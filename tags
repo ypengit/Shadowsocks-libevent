@@ -1,0 +1,28 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.9~svn20110310	//
+Epoll	ss-server.cpp	/^class Epoll(){$/;"	f
+EventLoop	ss-server.cpp	/^class EventLoop{$/;"	c	file:
+EventLoopThread	ss-server.cpp	/^        EventLoopThread(){$/;"	f	class:EventLoopThread
+EventLoopThread	ss-server.cpp	/^    EventLoopThread(int num){$/;"	f	class:EventLoopThreadPool
+EventLoopThread	ss-server.cpp	/^class EventLoopThread{$/;"	c	file:
+EventLoopThreadPool	ss-server.cpp	/^class EventLoopThreadPool{$/;"	c	file:
+PORT	client.cpp	11;"	d	file:
+PORT	server.cpp	13;"	d	file:
+SERVER_ADDRESS	server.cpp	12;"	d	file:
+Server	ss-server.cpp	/^    Server(char * server_ip, int server_port){$/;"	f	class:Server
+Server	ss-server.cpp	/^class Server{$/;"	c	file:
+TRANSMIT_TYPE	client.cpp	12;"	d	file:
+TRANSMIT_TYPE	server.cpp	14;"	d	file:
+eventLoopThreadPool	ss-server.cpp	/^    EventLoopThreadPool eventLoopThreadPool;$/;"	m	class:Server	file:
+handleMainThread	ss-server.cpp	/^void handleMainThread(){$/;"	f
+main	client.cpp	/^int main(int argc, char ** argv){$/;"	f
+main	server.cpp	/^int main(int argc, char ** argv){$/;"	f
+main	ss-server.cpp	/^int main(int argc, char ** argv){$/;"	f
+start	ss-server.cpp	/^    void start(){$/;"	f	class:Server
+t	ss-server.cpp	/^        Thread t;$/;"	m	class:EventLoopThread	file:
+threadNum	ss-server.cpp	/^    int threadNum;$/;"	m	class:Server	file:
+vec	ss-server.cpp	/^    vector<EventLoopThread> vec;$/;"	m	class:EventLoopThreadPool	file:
