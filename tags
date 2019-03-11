@@ -4,12 +4,13 @@
 !_TAG_PROGRAM_NAME	Exuberant Ctags	//
 !_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
 !_TAG_PROGRAM_VERSION	5.9~svn20110310	//
-Epoll	ss-server.cpp	/^class Epoll(){$/;"	f
-EventLoop	ss-server.cpp	/^class EventLoop{$/;"	c	file:
-EventLoopThread	ss-server.cpp	/^        EventLoopThread(){$/;"	f	class:EventLoopThread
-EventLoopThread	ss-server.cpp	/^    EventLoopThread(int num){$/;"	f	class:EventLoopThreadPool
-EventLoopThread	ss-server.cpp	/^class EventLoopThread{$/;"	c	file:
-EventLoopThreadPool	ss-server.cpp	/^class EventLoopThreadPool{$/;"	c	file:
+Epoll	ss-server.cpp	/^class Epoll(){$/;"	f	class:Server
+Event	ss-server.cpp	/^    Event():$/;"	f	class:Event
+Event	ss-server.cpp	/^class Event{$/;"	c	file:
+EventThread	ss-server.cpp	/^        EventThread(){$/;"	f	class:EventThread
+EventThread	ss-server.cpp	/^    EventThread(int num){$/;"	f	class:EventThreadPool
+EventThread	ss-server.cpp	/^class EventThread{$/;"	c	file:
+EventThreadPool	ss-server.cpp	/^class EventThreadPool{$/;"	c	file:
 PORT	client.cpp	11;"	d	file:
 PORT	server.cpp	13;"	d	file:
 SERVER_ADDRESS	server.cpp	12;"	d	file:
@@ -17,12 +18,15 @@ Server	ss-server.cpp	/^    Server(char * server_ip, int server_port){$/;"	f	clas
 Server	ss-server.cpp	/^class Server{$/;"	c	file:
 TRANSMIT_TYPE	client.cpp	12;"	d	file:
 TRANSMIT_TYPE	server.cpp	14;"	d	file:
-eventLoopThreadPool	ss-server.cpp	/^    EventLoopThreadPool eventLoopThreadPool;$/;"	m	class:Server	file:
-handleMainThread	ss-server.cpp	/^void handleMainThread(){$/;"	f
+Thread	ss-server.cpp	/^class Thread(){$/;"	f
+addHandler	ss-server.cpp	/^    void addHandler(int fd, void * cb, const char * type){$/;"	f	class:Event
+base	ss-server.cpp	/^    struct event_base *base;$/;"	m	class:Event	typeref:struct:Event::event_base	file:
+loopFunc	ss-server.cpp	/^void loopFunc(EventLoop *loop){$/;"	f
 main	client.cpp	/^int main(int argc, char ** argv){$/;"	f
 main	server.cpp	/^int main(int argc, char ** argv){$/;"	f
-main	ss-server.cpp	/^int main(int argc, char ** argv){$/;"	f
-start	ss-server.cpp	/^    void start(){$/;"	f	class:Server
-t	ss-server.cpp	/^        Thread t;$/;"	m	class:EventLoopThread	file:
-threadNum	ss-server.cpp	/^    int threadNum;$/;"	m	class:Server	file:
-vec	ss-server.cpp	/^    vector<EventLoopThread> vec;$/;"	m	class:EventLoopThreadPool	file:
+main	ss-server.cpp	/^int main(int argc, char ** argv){$/;"	f	class:Server
+quit	ss-server.cpp	/^    bool quit = false;$/;"	m	class:Event	file:
+quit	ss-server.cpp	/^void quit(){$/;"	f	class:Server
+t	ss-server.cpp	/^        Thread t;$/;"	m	class:EventThread	file:
+vec	ss-server.cpp	/^    vector<shared_ptr<EventThread>> vec;$/;"	m	class:EventThreadPool	file:
+~EventThread	ss-server.cpp	/^        ~EventThread(){$/;"	f	class:EventThread

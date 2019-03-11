@@ -18,13 +18,31 @@ class Event{
 
     //往event_base中添加一个handler,往event_base中
     //注册这个事件
-    void addHandler(int fd, void * cb, const char * type){
+    void addHandler(int fd, void(*) cb, const char * type){
         struct event * ev = event_new(base, fd, EV_PERSISIT, type);
         event_add(ev);
     }
 
+    void loop(){
+        event_add(evsignal_new(base, SIGINT, quit, event_self_cbargs()));
+        event_base_dipatch(base);
+    }
+
+    void quit(int fd, short event, void * arg){
+        struct event_base * base = (struct event_base *)arg;
+        event_base_loopbreak(base);
+        event_del(event);
+    }
+
+    void startToQuit(){
+        quiting = true;
+        event_base_loopbreak(base);
+        exit(0);
+    }
+
+
     struct event_base *base;
-    bool quit = false;
+    bool quiting = false;
 };
 
 class EventThreadPool{
@@ -38,39 +56,47 @@ class EventThreadPool{
 };
 
 
-void loopFunc(EventLoop *loop){
-    loop->loop();
-};
 
 class Thread(){
     public:
         Thread(){
 
-            eventLoop.loop();
         }
 
-        void start(){
 
-        }
-
-        void stop(){
-
-        }
-
-        EventLoop eventLoop;
-        thread t(loopFunc, &eventLoop);
 };
 
 
 class EventThread{
     public:
         EventThread(){
-            t.start();
+
         }
         ~EventThread(){
-            t.stop();
+            stop();
         }
-        Thread t;
+
+        void start(){
+            t.join();
+        }
+
+        void stop(){
+            event.startToQuit();
+        }
+
+        void loopFunc(shared_ptr<Event> event){
+            //[TODO]这里分配了event对象又该怎么做？
+            //
+            //自动就handle了呀，因为这些事件注册在Event这个基本对象中，
+            //libevent这个库只要fd可用，就自动执行回调函数
+            //loop->handleEvents();
+            //
+            //
+            //那么，每个线程应该保有一个Event对象！！！！
+            event.loop();
+        };
+        shared_ptr<Event> event;
+        thread t(loopFunc, event);
 };
 
 class Server{
@@ -88,10 +114,11 @@ class Server{
 
     //创建一个线程池，用于处理来自于主线程的消息
     void start(){
-        eventLoopThreadPool.start();
+        eventThreadPool.start();
         int socket_fd = listenPort();
-        even
+        mainEvent->addHandler(socket_fd, handleMainConn, "MainThreadConnection");
     }
+
     int listenPort(){
         int socket_fd = socket(AF_INET, communicateMethod, 0);
 
@@ -108,13 +135,73 @@ class Server{
             perror("listen");
             exit(1);
         }
+        //此处就结束了，将accept操作放到主线程的那个循环中去
         return socket_fd;
     }
+
     int threadNum;
     EventLoopThreadPool eventLoopThreadPool;
     bool quit;
     int communicateMethod;
-};
+
+    void handleMainConn(){
+        int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+
+        struct sockaddr_in server_addr;
+
+        bzero(&server_addr, sizeof(server_addr));
+
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_port = htons(PORT);
+        server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+
+        if(bind(socket_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1){
+            perror("bind error");
+            exit(1);
+        }
+
+        if(listen(socket_fd, 20) == -1){
+            perror("listen error");
+            exit(1);
+        }
+
+        struct sockaddr_in client_addr;
+        socklen_t len = sizeof(client_addr);
+
+        int accept_fd = accept(socket_fd, (struct sockaddr*)&client_addr, &len);
+        if(accept_fd < 0){
+            perror("accept error");
+            exit(1);
+        }
+
+        std::cout << socket_fd <<std::endl;
+
+        //fd_set rfds;
+        //FD_ZERO(&rfds);
+        //FD_SET(accept_fd, &rfds);
+
+        int epoll_fd = epoll_create(100);
+
+        struct epoll_event accept_event;
+        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, accept_fd, &accept_event);
+
+        while(1){
+            int epoll_wait_res = epoll_wait(epoll_fd, &accept_event, 100, 0);
+            epoll_ctl(epoll_fd, EPOLL_CTL_ADD, accept_fd, &accept_event);
+            if(epoll_wait_res < 0){
+                perror("epoll_wait zero condition");
+            }
+            else{
+                char buff[1024];
+                memset(buff, '\0', sizeof(buff));
+                int size = read(accept_fd, buff, sizeof(buff));
+                printf("%s", buff);
+                std::cout << epoll_wait_res << std::endl;
+            }
+        }
+    }
+    };
 
 //Epoll对象应该是谁持有？[TODO]
 class Epoll(){
@@ -123,63 +210,6 @@ class Epoll(){
 
 
 
-void handleMainThread(){
-    int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
-
-    struct sockaddr_in server_addr;
-
-    bzero(&server_addr, sizeof(server_addr));
-
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(PORT);
-    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-
-    if(bind(socket_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1){
-        perror("bind error");
-        exit(1);
-    }
-
-    if(listen(socket_fd, 20) == -1){
-        perror("listen error");
-        exit(1);
-    }
-
-    struct sockaddr_in client_addr;
-    socklen_t len = sizeof(client_addr);
-
-    int accept_fd = accept(socket_fd, (struct sockaddr*)&client_addr, &len);
-    if(accept_fd < 0){
-        perror("accept error");
-        exit(1);
-    }
-
-    std::cout << socket_fd <<std::endl;
-
-    //fd_set rfds;
-    //FD_ZERO(&rfds);
-    //FD_SET(accept_fd, &rfds);
-
-    int epoll_fd = epoll_create(100);
-
-    struct epoll_event accept_event;
-    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, accept_fd, &accept_event);
-
-    while(1){
-        int epoll_wait_res = epoll_wait(epoll_fd, &accept_event, 100, 0);
-        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, accept_fd, &accept_event);
-        if(epoll_wait_res < 0){
-            perror("epoll_wait zero condition");
-        }
-        else{
-            char buff[1024];
-            memset(buff, '\0', sizeof(buff));
-            int size = read(accept_fd, buff, sizeof(buff));
-            printf("%s", buff);
-            std::cout << epoll_wait_res << std::endl;
-        }
-    }
-}
 
 void quit(){
 
