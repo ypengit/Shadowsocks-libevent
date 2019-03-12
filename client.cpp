@@ -8,7 +8,7 @@
 #include <iostream>
 
 
-#define PORT 8888
+#define PORT 7000
 #define TRANSMIT_TYPE "tcp"
 
 
