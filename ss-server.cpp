@@ -1,12 +1,24 @@
 #include <getopt.h>
+#include <iostream>
 #include <vector>
 #include <event2/event.h>
 #include <pthread.h>
 #include <thread>
 #include <signal.h>
 #include <memory>
+#include <unistd.h>
+#include <string.h>
+#include <queue>
+#include <unordered_map>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 
+
+void quit(int fd, short event, void * arg){
+    struct event_base * base = (struct event_base *)arg;
+    event_base_loopbreak(base);
+}
 
 
 
@@ -20,21 +32,16 @@ class Event{
 
     //往event_base中添加一个handler,往event_base中
     //注册这个事件
-    void addHandler(int fd, void(void) *cb){
-        struct event * ev = event_new(base, fd, cb, (void *)base);
-        event_add(ev);
+    void addHandler(int fd, void (*cb)(int, short, void *)){
+        struct event * ev = event_new(base, fd, 0, cb, (void *)base);
+        event_add(ev, NULL);
     }
 
     void loop(){
-        event_add(evsignal_new(base, SIGINT, quit, event_self_cbargs()));
-        event_base_dipatch(base);
+        event_add(evsignal_new(base, SIGINT, quit, event_self_cbarg()), NULL);
+        event_base_dispatch(base);
     }
 
-    void quit(int fd, short event, void * arg){
-        struct event_base * base = (struct event_base *)arg;
-        event_base_loopbreak(base);
-        event_del(event);
-    }
 
     void startToQuit(){
         quiting = true;
@@ -47,56 +54,63 @@ class Event{
     bool quiting = false;
 };
 
-class EventThreadPool{
-    public:
-    EventThreadPool(int num){
-        for(int i = 0; i < num; ++i){
-            vec.push_back(new EventThread());
-            vec[i].start();
-        }
-    }
-    ~EventThreadPool(){
 
-    }
-
-    vector<shared_ptr<EventThread>> vec;
+void loopFunc(std::shared_ptr<Event> event){
+    //[TODO]这里分配了event对象又该怎么做？
+    //
+    //自动就handle了呀，因为这些事件注册在Event这个基本对象中，
+    //libevent这个库只要fd可用，就自动执行回调函数
+    //loop->handleEvents();
+    //
+    //
+    //那么，每个线程应该保有一个Event对象！！！！
+    event->loop();
 };
-
 
 
 
 class EventThread{
     public:
         EventThread(){
-
+            std::thread th(loopFunc, ev);
+            t = &th;
         }
         ~EventThread(){
             stop();
         }
 
         void start(){
-            t.join();
+            t->join();
         }
 
         void stop(){
-            event.startToQuit();
         }
 
-        void loopFunc(shared_ptr<Event> event){
-            //[TODO]这里分配了event对象又该怎么做？
-            //
-            //自动就handle了呀，因为这些事件注册在Event这个基本对象中，
-            //libevent这个库只要fd可用，就自动执行回调函数
-            //loop->handleEvents();
-            //
-            //
-            //那么，每个线程应该保有一个Event对象！！！！
-            event.loop();
-        };
-        shared_ptr<Event> event;
-        thread t(loopFunc, event);
+        std::shared_ptr<Event> ev;
+        std::thread *t;
 };
 
+
+class EventThreadPool:std::enable_shared_from_this<EventThreadPool>{
+    public:
+    EventThreadPool(int num){
+        for(int i = 0; i < num; ++i){
+            EventThread th;
+            vec.push_back(&th);
+        }
+    }
+    void start(){
+        for(int i = 0; i < vec.size(); ++i){
+            vec[i]->start();
+        }
+    }
+
+    ~EventThreadPool(){
+
+    }
+
+    std::vector<EventThread*> vec;
+};
 
 
 //编码和解码的工作留到后面做，这里先假设不加密的情况[TODO]
@@ -113,148 +127,151 @@ struct message{
 };
 
 
-class Server{
-    public:
-    //初始化服务器信息
-    Server(char * server_ip, int server_port){
-    Server (const char * server_ip,
-            const char * server_port,
-            const char * password,
-            const char * method,
-            Event * mainEvent):
-    {
-
-    }
-
-    //创建一个线程池，用于处理来自于主线程的消息
-    void start(){
-        eventThreadPool.start();
-        int socket_fd = listenPort();
-        mainEvent->addHandler(socket_fd, handleMainConn, "MainThreadConnection");
-        //应该在主线程中注册一个signal事件，用于结束主线程的左右事件
-    }
-
-    int listenPort(){
-        int socket_fd = socket(AF_INET, communicateMethod, 0);
-
-        struct socketaddr_in serverAddr;
-        serverAddr.sin_family(AF_INET);
-        serverAddr.sin_port(htons(server_port));
-        serverAddr.sin_addr.s_addr(htonl(server_ip));
-
-        if(bind(socket_fd, (struct socketaddr *)serverAddr, sizeof(serverAddr)) == -1){
-            perror("bind");
-            exit(1);
-        }
-        if(listen(socket_fd, 2048) == -1){
-            perror("listen");
-            exit(1);
-        }
-        //此处就结束了，将accept操作放到主线程的那个循环中去
-        return socket_fd;
-    }
-
-    int threadNum;
-    EventLoopThreadPool eventLoopThreadPool;
-    bool quit;
-    int communicateMethod;
 
 
+void handleWork(int fd, short event, void * arg){
+    struct message * msg = (struct message *)arg;
+    //读取从local端传来的消息，并伪装发给服务器
+    //if(existed.find() != existed.end()){
+    if(false){
+        //这一对端口 发送地址、发送端口、目标地址、目标端口的结构体存在，说明它的读和写都有fd,可以直接读和写
+        if(1){
+            //从服务器发来的消息
 
-    //小根堆线程负载均衡
-    priority_queue<struct event_base *, std::vector<struct event_base *>, [](struct event_base * a, struct event_base * b){
-        return std::greater<int>(a->event_count, b->event_count);}> eventBaseSet;
-    vector<struct event_base *> events;
-
-    void handleWork(int fd, short event, void * arg){
-        struct message * msg = (struct message *)arg;
-        //读取从local端传来的消息，并伪装发给服务器
-        if(existed.find() != existed.end()){
-            //这一对端口 发送地址、发送端口、目标地址、目标端口的结构体存在，说明它的读和写都有fd,可以直接读和写
-            if(){
-                //从服务器发来的消息
-
-            }
-            else{
-                //从local发来的消息
-
-            }
         }
         else{
-            //读取传来的消息并解析
-            //创建新的socket,并与服务器通信
-            struct sockaddr_in *target_addr;
-            int sendfd = socket(AF_INET, SOCK_STREAM, 0);
-            target_addr = msg->addr;
-            if(connect(sendfd, (struct sockaddr *)target_addr, sizeof(struct sockaddr)) < 0){
-                perror("connect");
-                exit(1);
-            }
-            else{
-                int validLen = write(sendfd, valid, strlen(valid));
-                printf("%d chars is written!\n", validLen);
-            }
+            //从local发来的消息
+
         }
     }
-
-    void dispatchToWorkThread(int fd, short event, void * arg){
-        struct sockaddr_in *client_addr = (struct sockaddr_in*)arg;
-        struct event_base * base = eventBaseSet.top();
-        struct message msg;
-        //这里在主线程就要派遣,不能留到工作线程，因为工作线程会持续不断的读取fd，这样多个线程就要重复读取，有异步问题
-        struct event *ev = event_new(base, fd, 0, handleWork, (void *)msg);
-        event_add(ev, NULL);
-        //超时关闭请求，后面再做[TODO]
-    }
-
-    void handleMainConn(int fd, short event, void * arg){
-        struct event_base *base = (struct event_base *)arg;
-
-        struct sockaddr_in client_addr;
-        socklen_t len = sizeof(client_addr);
-
-        int accept_fd = accept(fd, (struct sockaddr*)&client_addr, &len);
-
-        if(accept_fd < 0){
-            perror("accept error");
+    else{
+        //读取传来的消息并解析
+        //创建新的socket,并与服务器通信
+        struct sockaddr_in *target_addr;
+        int sendfd = socket(AF_INET, SOCK_STREAM, 0);
+        target_addr = msg->addr;
+        if(connect(sendfd, (struct sockaddr *)target_addr, sizeof(struct sockaddr)) < 0){
+            perror("connect");
             exit(1);
         }
-
-        //此时应该在主线程中监听，如果监听到事件到来，则解析并把事件派遣到工作线程
-        struct event * listenEvent;
-        listenEvent = event_new(base, accept_fd, EV_PERSIST, dispatchToWorkThread, (void *)client_addr);
-        event_add(listenEvent, NULL);
-        event_base_dispatch(base);
-    };
-    unordered_map<struct, int>
+        else{
+            int validLen = write(sendfd, msg->data, strlen(msg->data));
+            printf("%d chars is written!\n", validLen);
+        }
+    }
 }
+
+
+void dispatchToWorkThread(int fd, short event, void * arg){
+    struct sockaddr_in *client_addr = (struct sockaddr_in*)arg;
+    struct event_base * base;
+    struct message msg;
+    //这里在主线程就要派遣,不能留到工作线程，因为工作线程会持续不断的读取fd，这样多个线程就要重复读取，有异步问题
+    struct event *ev = event_new(base, fd, 0, handleWork, (void *)&msg);
+    event_add(ev, NULL);
+    //超时关闭请求，后面再做[TODO]
+}
+
+void handleMainConn(int fd, short event, void * arg){
+    struct event_base *base = (struct event_base *)arg;
+
+    struct sockaddr_in client_addr;
+    socklen_t len = sizeof(client_addr);
+
+    int accept_fd = accept(fd, (struct sockaddr*)&client_addr, &len);
+
+    if(accept_fd < 0){
+        perror("accept error");
+        exit(1);
+    }
+    //此时应该在主线程中监听，如果监听到事件到来，则解析并把事件派遣到工作线程
+    struct event * listenEvent;
+    listenEvent = event_new(base, accept_fd, EV_PERSIST, dispatchToWorkThread, (void *) &client_addr);
+    event_add(listenEvent, NULL);
+    event_base_dispatch(base);
+}
+
+class Server{
+    public:
+        //初始化服务器信息
+        Server(std::string server_ip, int server_port, std::string password, std::string method, Event * mainEvent, int threadNum):
+            eventThreadPool(threadNum)
+        {
+
+        }
+
+        //创建一个线程池，用于处理来自于主线程的消息
+        void start(){
+            eventThreadPool.start();
+            int socket_fd = listenPort();
+            mainEvent->addHandler(socket_fd, handleMainConn);
+            //应该在主线程中注册一个signal事件，用于结束主线程的左右事件
+        }
+
+        int listenPort(){
+            int socket_fd = socket(AF_INET, communicateMethod, 0);
+
+            struct sockaddr_in serverAddr;
+            //serverAddr.sin_family = AF_INET;
+            //serverAddr.sin_port = htons(server_port);
+            //serverAddr.sin_addr.s_addr = htonl(server_ip.c_str());
+            serverAddr.sin_family = AF_INET;
+            serverAddr.sin_port = htons(7000);
+            serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+
+
+            if(bind(socket_fd, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) == -1){
+                perror("bind");
+                exit(1);
+            }
+            if(listen(socket_fd, 2048) == -1){
+                perror("listen");
+                exit(1);
+            }
+            //此处就结束了，将accept操作放到主线程的那个循环中去
+            return socket_fd;
+        }
+
+        std::string server_ip;
+        std::string password;
+        std::string method;
+        int server_port;
+        Event * mainEvent;
+        int threadNum;
+        EventThreadPool eventThreadPool;
+        bool quit;
+        int communicateMethod;
+        //小根堆线程负载均衡
+        std::vector<struct event_base *> events;
+};
 
 
 int main(int argc, char ** argv){
     int opt;
-    int load_config = false;
 
-    char * server_ip;
-    char * local_address_ip;
-    char * password;
-    char * method;
+    std::string server_ip;
+    std::string local_address_ip;
+    std::string password;
+    std::string method;
 
     int server_port;
     int local_port;
     int timeout;
 
+    char * configPath = NULL;
     const char * str = "c|s|p|l|k|m|t|h";
 	while(opt = getopt(argc, argv, str)){
 		switch(opt){
 			case 'c':
-                char * configPath = optarg;
+                configPath = optarg;
                 server_ip = "127.0.0.1";
                 server_port = 9999;
                 password = "123456";
                 method = "chacha20";
-
-			case 'h':/*{{{*/
-				std::cout << "" << std::endl;
+                break;
+			case 'h':
+				std::cout << "" << std::endl
 					<< "  usage:" << std::endl
 					<< "" << std::endl
 					<< "    ss-server" << std::endl
@@ -299,11 +316,10 @@ int main(int argc, char ** argv){
 					<< "       [--plugin-opts <options>]  Set SIP003 plugin options. (Experimental)" << std::endl
 					<< "" << std::endl
 					<< "       [-v]                       Verbose mode." << std::endl
-					<< "       [-h, --help]               Print this message." << std::endl;/*}}}*/
-				break;
+					<< "       [-h, --help]               Print this message." << std::endl;
+                exit(0);
 			case 's':
-                server_ip = new char[sizeof(optarg)];
-                strcpy(server_ip, optarg);
+                server_ip = optarg;
 				break;
             case 'p':
 				server_port = atoi(optarg);
@@ -312,23 +328,24 @@ int main(int argc, char ** argv){
 				local_port = atoi(optarg);
                 break;
             case 'k':
-                password = new char[sizeof(optarg)];
-                strcpy(passward, optarg);
+                password = optarg;
                 break;
             case 'm':
-                method = new char[sizeof(optarg)];
-                strcpy(method, optarg);
+                method = optarg;
+                break;
+            default:
                 break;
             //先做这些选项[TODO],剩下的以后做
         }
     }
 
+    int threadNum = 4;
 
     //创建监听服务器，监听事件的到来,服务器的设计
     //要考虑多个使用者的情况
     Event mainEvent;
 
-    Server server(server_ip, server_port, password, method, &mainEvent);
+    Server server(server_ip, server_port, password, method, &mainEvent, threadNum);
     server.start();
 
 
@@ -340,10 +357,6 @@ int main(int argc, char ** argv){
     //  epoll的包装
     mainEvent.loop();
 
-    delete [] server_ip;
-    delete [] local_ip;
-    delete [] password;
-    delete [] method;
 
     return 0;
 }

@@ -4,35 +4,52 @@
 !_TAG_PROGRAM_NAME	Exuberant Ctags	//
 !_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
 !_TAG_PROGRAM_VERSION	5.9~svn20110310	//
-Epoll	ss-server.cpp	/^class Epoll(){$/;"	f	class:Server
 Event	ss-server.cpp	/^    Event():$/;"	f	class:Event
 Event	ss-server.cpp	/^class Event{$/;"	c	file:
 EventThread	ss-server.cpp	/^        EventThread(){$/;"	f	class:EventThread
 EventThread	ss-server.cpp	/^class EventThread{$/;"	c	file:
 EventThreadPool	ss-server.cpp	/^    EventThreadPool(int num){$/;"	f	class:EventThreadPool
-EventThreadPool	ss-server.cpp	/^class EventThreadPool{$/;"	c	file:
+EventThreadPool	ss-server.cpp	/^class EventThreadPool:std::enable_shared_from_this<EventThreadPool>{$/;"	c	file:
 PORT	client.cpp	11;"	d	file:
 PORT	server.cpp	13;"	d	file:
 SERVER_ADDRESS	server.cpp	12;"	d	file:
-Server	ss-server.cpp	/^    Server(char * server_ip, int server_port){$/;"	f	class:Server
+Server	ss-server.cpp	/^        Server(std::string server_ip, int server_port, std::string password, std::string method, Event * mainEvent){$/;"	f	class:Server
 Server	ss-server.cpp	/^class Server{$/;"	c	file:
 TRANSMIT_TYPE	client.cpp	12;"	d	file:
 TRANSMIT_TYPE	server.cpp	14;"	d	file:
-Thread	ss-server.cpp	/^class Thread(){$/;"	f
-addHandler	ss-server.cpp	/^    void addHandler(int fd, void(*) cb, const char * type){$/;"	f	class:Event
+addHandler	ss-server.cpp	/^    void addHandler(int fd, void (*cb)(int, short, void *)){$/;"	f	class:Event
+addr	ss-server.cpp	/^    struct sockaddr_in *addr;$/;"	m	struct:message	typeref:struct:message::sockaddr_in	file:
 base	ss-server.cpp	/^    struct event_base *base;$/;"	m	class:Event	typeref:struct:Event::event_base	file:
-event	ss-server.cpp	/^        shared_ptr<Event> event;$/;"	m	class:EventThread	file:
+communicateMethod	ss-server.cpp	/^        int communicateMethod;$/;"	m	class:Server	file:
+data	ss-server.cpp	/^    char data[0];$/;"	m	struct:message	file:
+dispatchToWorkThread	ss-server.cpp	/^void dispatchToWorkThread(int fd, short event, void * arg){$/;"	f
+ev	ss-server.cpp	/^        std::shared_ptr<Event> ev;$/;"	m	class:EventThread	file:
+eventThreadPool	ss-server.cpp	/^        EventThreadPool eventThreadPool;$/;"	m	class:Server	file:
+events	ss-server.cpp	/^        std::vector<struct event_base *> events;$/;"	m	class:Server	file:
+handleMainConn	ss-server.cpp	/^void handleMainConn(int fd, short event, void * arg){$/;"	f
+handleWork	ss-server.cpp	/^void handleWork(int fd, short event, void * arg){$/;"	f
+listenPort	ss-server.cpp	/^        int listenPort(){$/;"	f	class:Server
 loop	ss-server.cpp	/^    void loop(){$/;"	f	class:Event
-loopFunc	ss-server.cpp	/^        void loopFunc(shared_ptr<Event> event){$/;"	f	class:EventThread
+loopFunc	ss-server.cpp	/^void loopFunc(std::shared_ptr<Event> event){$/;"	f
 main	client.cpp	/^int main(int argc, char ** argv){$/;"	f
 main	server.cpp	/^int main(int argc, char ** argv){$/;"	f
-main	ss-server.cpp	/^int main(int argc, char ** argv){$/;"	f	class:Server
-quit	ss-server.cpp	/^    void quit(int fd, short event, void * arg){$/;"	f	class:Event
-quit	ss-server.cpp	/^void quit(){$/;"	f	class:Server
+main	ss-server.cpp	/^int main(int argc, char ** argv){$/;"	f
+mainEvent	ss-server.cpp	/^        Event * mainEvent;$/;"	m	class:Server	file:
+message	ss-server.cpp	/^struct message{$/;"	s	file:
+method	ss-server.cpp	/^        std::string method;$/;"	m	class:Server	file:
+password	ss-server.cpp	/^        std::string password;$/;"	m	class:Server	file:
+quit	ss-server.cpp	/^        bool quit;$/;"	m	class:Server	file:
+quit	ss-server.cpp	/^void quit(int fd, short event, void * arg){$/;"	f
 quiting	ss-server.cpp	/^    bool quiting = false;$/;"	m	class:Event	file:
+server_ip	ss-server.cpp	/^        std::string server_ip;$/;"	m	class:Server	file:
+server_port	ss-server.cpp	/^        int server_port;$/;"	m	class:Server	file:
 start	ss-server.cpp	/^        void start(){$/;"	f	class:EventThread
+start	ss-server.cpp	/^        void start(){$/;"	f	class:Server
+start	ss-server.cpp	/^    void start(){$/;"	f	class:EventThreadPool
 startToQuit	ss-server.cpp	/^    void startToQuit(){$/;"	f	class:Event
 stop	ss-server.cpp	/^        void stop(){$/;"	f	class:EventThread
-vec	ss-server.cpp	/^    vector<shared_ptr<EventThread>> vec;$/;"	m	class:EventThreadPool	file:
+t	ss-server.cpp	/^        std::thread *t;$/;"	m	class:EventThread	file:
+threadNum	ss-server.cpp	/^        int threadNum;$/;"	m	class:Server	file:
+vec	ss-server.cpp	/^    std::vector<EventThread*> vec;$/;"	m	class:EventThreadPool	file:
 ~EventThread	ss-server.cpp	/^        ~EventThread(){$/;"	f	class:EventThread
 ~EventThreadPool	ss-server.cpp	/^    ~EventThreadPool(){$/;"	f	class:EventThreadPool
