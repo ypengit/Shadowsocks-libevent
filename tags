@@ -8,8 +8,8 @@ Epoll	ss-server.cpp	/^class Epoll(){$/;"	f	class:Server
 Event	ss-server.cpp	/^    Event():$/;"	f	class:Event
 Event	ss-server.cpp	/^class Event{$/;"	c	file:
 EventThread	ss-server.cpp	/^        EventThread(){$/;"	f	class:EventThread
-EventThread	ss-server.cpp	/^    EventThread(int num){$/;"	f	class:EventThreadPool
 EventThread	ss-server.cpp	/^class EventThread{$/;"	c	file:
+EventThreadPool	ss-server.cpp	/^    EventThreadPool(int num){$/;"	f	class:EventThreadPool
 EventThreadPool	ss-server.cpp	/^class EventThreadPool{$/;"	c	file:
 PORT	client.cpp	11;"	d	file:
 PORT	server.cpp	13;"	d	file:
@@ -19,14 +19,20 @@ Server	ss-server.cpp	/^class Server{$/;"	c	file:
 TRANSMIT_TYPE	client.cpp	12;"	d	file:
 TRANSMIT_TYPE	server.cpp	14;"	d	file:
 Thread	ss-server.cpp	/^class Thread(){$/;"	f
-addHandler	ss-server.cpp	/^    void addHandler(int fd, void * cb, const char * type){$/;"	f	class:Event
+addHandler	ss-server.cpp	/^    void addHandler(int fd, void(*) cb, const char * type){$/;"	f	class:Event
 base	ss-server.cpp	/^    struct event_base *base;$/;"	m	class:Event	typeref:struct:Event::event_base	file:
-loopFunc	ss-server.cpp	/^void loopFunc(EventLoop *loop){$/;"	f
+event	ss-server.cpp	/^        shared_ptr<Event> event;$/;"	m	class:EventThread	file:
+loop	ss-server.cpp	/^    void loop(){$/;"	f	class:Event
+loopFunc	ss-server.cpp	/^        void loopFunc(shared_ptr<Event> event){$/;"	f	class:EventThread
 main	client.cpp	/^int main(int argc, char ** argv){$/;"	f
 main	server.cpp	/^int main(int argc, char ** argv){$/;"	f
 main	ss-server.cpp	/^int main(int argc, char ** argv){$/;"	f	class:Server
-quit	ss-server.cpp	/^    bool quit = false;$/;"	m	class:Event	file:
+quit	ss-server.cpp	/^    void quit(int fd, short event, void * arg){$/;"	f	class:Event
 quit	ss-server.cpp	/^void quit(){$/;"	f	class:Server
-t	ss-server.cpp	/^        Thread t;$/;"	m	class:EventThread	file:
+quiting	ss-server.cpp	/^    bool quiting = false;$/;"	m	class:Event	file:
+start	ss-server.cpp	/^        void start(){$/;"	f	class:EventThread
+startToQuit	ss-server.cpp	/^    void startToQuit(){$/;"	f	class:Event
+stop	ss-server.cpp	/^        void stop(){$/;"	f	class:EventThread
 vec	ss-server.cpp	/^    vector<shared_ptr<EventThread>> vec;$/;"	m	class:EventThreadPool	file:
 ~EventThread	ss-server.cpp	/^        ~EventThread(){$/;"	f	class:EventThread
+~EventThreadPool	ss-server.cpp	/^    ~EventThreadPool(){$/;"	f	class:EventThreadPool

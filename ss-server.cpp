@@ -8,6 +8,8 @@
 
 
 
+
+
 class Event{
     public:
     Event():
@@ -18,8 +20,8 @@ class Event{
 
     //往event_base中添加一个handler,往event_base中
     //注册这个事件
-    void addHandler(int fd, void(*) cb, const char * type){
-        struct event * ev = event_new(base, fd, EV_PERSISIT, type);
+    void addHandler(int fd, void(*) cb){
+        struct event * ev = event_new(base, fd, cb, (void *)base);
         event_add(ev);
     }
 
@@ -47,11 +49,16 @@ class Event{
 
 class EventThreadPool{
     public:
-    EventThread(int num){
+    EventThreadPool(int num){
         for(int i = 0; i < num; ++i){
             vec.push_back(new EventThread());
+            vec[i].start();
         }
     }
+    ~EventThreadPool(){
+
+    }
+
     vector<shared_ptr<EventThread>> vec;
 };
 
@@ -99,6 +106,14 @@ class EventThread{
         thread t(loopFunc, event);
 };
 
+
+
+//编码和解码的工作留到后面做，这里先假设不加密的情况[TODO]
+//class EncryptDecrypt{
+//    public:
+//    static encrypt(
+//};
+
 class Server{
     public:
     //初始化服务器信息
@@ -144,63 +159,55 @@ class Server{
     bool quit;
     int communicateMethod;
 
-    void handleMainConn(){
-        int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct status{
+        int registedEventNum;
+        struct event_base *base;
+    }
 
-        struct sockaddr_in server_addr;
-
-        bzero(&server_addr, sizeof(server_addr));
-
-        server_addr.sin_family = AF_INET;
-        server_addr.sin_port = htons(PORT);
-        server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-
-        if(bind(socket_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1){
-            perror("bind error");
-            exit(1);
+    struct event_base  * selectEventBase(){
+        if(threadStatus.top().registedEventNum == 0){
+            threadStatus.top().registedEventNum += 1;
+            return threadStatus.top().base;
         }
+        for(int i = 0; i < threadNum; ++i){
 
-        if(listen(socket_fd, 20) == -1){
-            perror("listen error");
-            exit(1);
         }
+        struct event_base * base = threadStatus.top().base;
+    }
+
+    //小根堆线程负载均衡
+    priority_queue<status, std::vector<status>, [](status &a, status &b){
+        return std::greater<int>(a.registedEventNum, b.registedEventNum)}> threadStatus;
+    vector<struct event_base *> events;
+
+    void dispatchToWorkThread(int fd, short event, void * arg){
+        char buffer[2048], res[2048];
+        int validLen = read(fd, buff, 2048);
+        strcpy(res, buffer);
+        struct sockaddr_in *client_addr = (struct sockaddr_in*)arg;
+
+    }
+
+    void handleMainConn(int fd, short event, void * arg){
+        struct event_base *base = (struct event_base *)arg;
 
         struct sockaddr_in client_addr;
         socklen_t len = sizeof(client_addr);
 
-        int accept_fd = accept(socket_fd, (struct sockaddr*)&client_addr, &len);
+        int accept_fd = accept(fd, (struct sockaddr*)&client_addr, &len);
         if(accept_fd < 0){
             perror("accept error");
             exit(1);
         }
 
-        std::cout << socket_fd <<std::endl;
-
-        //fd_set rfds;
-        //FD_ZERO(&rfds);
-        //FD_SET(accept_fd, &rfds);
-
-        int epoll_fd = epoll_create(100);
-
-        struct epoll_event accept_event;
-        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, accept_fd, &accept_event);
-
-        while(1){
-            int epoll_wait_res = epoll_wait(epoll_fd, &accept_event, 100, 0);
-            epoll_ctl(epoll_fd, EPOLL_CTL_ADD, accept_fd, &accept_event);
-            if(epoll_wait_res < 0){
-                perror("epoll_wait zero condition");
-            }
-            else{
-                char buff[1024];
-                memset(buff, '\0', sizeof(buff));
-                int size = read(accept_fd, buff, sizeof(buff));
-                printf("%s", buff);
-                std::cout << epoll_wait_res << std::endl;
-            }
-        }
-    }
+        //此时应该在主线程中监听，如果监听到事件到来，则解析并把事件派遣到工作线程
+        struct event * listenEvent;
+        listenEvent = event_new(base, accept_fd, EV_PERSIST, dispatchToWorkThread, (void *)client_addr);
+        struct timeval tv;
+        evutil_timerclear(&tv);
+        tv.tv_sec = 2;
+        event_add(listenEvent, &tv);
+        event_base_dispatch(base);
     };
 
 //Epoll对象应该是谁持有？[TODO]
@@ -319,8 +326,7 @@ int main(int argc, char ** argv){
     //  事件的处理用来监听主线程上端口信息的变化情
     //  况，并把信息传递给一个全局对象,这个对象是
     //  epoll的包装
-    events.addHandler(socket_fd, handleMainThread, "MainThread accept");
-    events.loop();
+    mainEvent.loop();
 
     delete [] server_ip;
     delete [] local_ip;
