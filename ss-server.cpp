@@ -15,6 +15,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <netdb.h>
+#include <limits>
 
 #include "ss-server.h"
 
@@ -113,6 +114,7 @@ class EventThreadPool{
         for(int i = 0; i < num; ++i){
             EventThread th;
             vec.push_back(&th);
+            res.push_back(th.get_base());
         }
     }
 
@@ -121,12 +123,10 @@ class EventThreadPool{
     }
 
     std::vector<struct event_base*> get_bases(){
-        std::vector<struct event_base*> res;
-        for(EventThread *t:vec){
-            res.push_back(t->get_base());
-        }
+        return res;
     }
 
+    std::vector<struct event_base*> res;
     std::vector<EventThread*> vec;
 };
 
@@ -411,17 +411,15 @@ void handleMainConn(int fd, short event, void * arg){
 class Server{
     public:
         //初始化服务器信息
-        Server(std::string server_ip, int server_port, std::string password, std::string method, Event * mainEvent, int threadNum):
-            eventThreadPool(threadNum),
-            mainEvent(mainEvent),
-            bases(eventThreadPool.get_bases())
+        Server(std::string server_ip, int server_port, std::string password, std::string method, int threadNum):
+            eventThreadPool(threadNum)
         {
+            bases = eventThreadPool.get_bases();
 
         }
 
         //创建一个线程池，用于处理来自于主线程的消息
         void start(){
-            printf("Program is running here!\n");
             struct sockaddr_in source_addr;
             int socket_fd = listenPort(source_addr);
             //这里要循环，以在主端口上监听，如果有事件到来，那么
@@ -432,7 +430,7 @@ class Server{
                 msg.src_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &len);
 
                 //使用小根堆，获得各个线程的负载情况，找到那些正在处理事件少的线程，分配给新到来的事件
-                msg.base = mainEvent->getBase();
+                msg.base = get_low_load_base();
                 msg.stage = 0;
 
 
@@ -445,11 +443,20 @@ class Server{
         }
 
         struct event_base * get_low_load_base(){
-
+            struct event_base * res;
+            unsigned short c = 65535u, t;
+            for(int i = 0; i < bases.size(); ++i){
+                t = event_base_get_num_events(bases[i], EVENT_BASE_COUNT_ADDED);
+                if(t < c){
+                    c = t;
+                    res = bases[i];
+                }
+            }
+            return res;
         }
 
         int listenPort(struct sockaddr_in &source_addr){
-            socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+            int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
 
             struct sockaddr_in serverAddr;
 
@@ -478,12 +485,7 @@ class Server{
         std::string method;
         int server_port;
         int threadNum;
-        Event * mainEvent;
         EventThreadPool eventThreadPool;
-        bool quit;
-        int communicateMethod;
-        int socket_fd;
-        //小根堆线程负载均衡
         std::vector<struct event_base *> events;
         std::vector<struct event_base*> bases;
 };
@@ -504,17 +506,16 @@ int main(int argc, char ** argv){
 
     char * configPath = NULL;
     const char * str = "c|s|p|l|k|m|t|h";
-    server_ip = "127.0.0.1"; server_port = 9999;
+    server_ip = "127.0.0.1";
+    server_port = 9999;
     password = "123456";
     method = "chacha20";
-	//while(opt = getopt(argc, argv, str)){/*{{{*//*{{{*/
+    std::unordered_map<std::string, char> methods;
+    //配置文件，读取所有加密方式
+
+	//while(opt = getopt(argc, argv, str)){/*{{{*/
 	//	switch(opt){
 	//		case 'c':
-    //            configPath = optarg;
-    //            server_ip = "127.0.0.1";
-    //            server_port = 9999;
-    //            password = "123456";
-    //            method = "chacha20";
     //            break;
 	//		case 'h':
 	//			std::cout << "" << std::endl
@@ -582,16 +583,16 @@ int main(int argc, char ** argv){
     //        default:
     //            break;
     //        //先做这些选项[TODO],剩下的以后做
-    //    }/*}}}*/
-    //}/*}}}*/
+    //    }
+    //}
+/*}}}*/
 
     int threadNum = 4;
 
     //创建监听服务器，监听事件的到来,服务器的设计
     //要考虑多个使用者的情况
-    Event mainEvent;
 
-    Server server(server_ip, server_port, password, method, &mainEvent, threadNum);
+    Server server(server_ip, server_port, password, method, threadNum);
     server.start();
 
 
