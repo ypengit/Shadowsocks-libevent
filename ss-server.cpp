@@ -12,12 +12,21 @@
 #include <unordered_map>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <time.h>
+#include <stdlib.h>
+#include <netdb.h>
+
+#include "ss-server.h"
+
+#define SOCKS_VERSION 0x05
 
 
 struct message{
-    struct sockaddr_in *src_addr;
-    struct sockaddr_in *dst_addr;
+    struct sockaddr_in dst_addr;
     struct event_base * base;
+    char stage;
+    char select_method;
+    char atyp;
     int src_fd;
     int dst_fd;
     //柔性数组
@@ -120,7 +129,11 @@ class EventThreadPool:std::enable_shared_from_this<EventThreadPool>{
 
 
 
-void handleReadFromClient(){
+void handleReadFromClient(int fd, short event, void * arg){
+
+}
+
+void handleReadFromServer(int fd, short event, void * arg){
 
 }
 
@@ -128,40 +141,179 @@ void handleWriteToClient(){
 
 }
 
-void handleReadFromServer(){
-
-}
 void handleWriteToServer(){
 
 }
 
+
+
+
 void handleMainConn(int fd, short event, void * arg){
+    //msg的stage状态：
+    //stage = 0 表示为初始状态
+    //stage = 1 表示沟通过使用的加密方式
+    //stage = 2 表示沟通完成，双方可以发送数据了
     struct message * msg = (struct message *)arg;
     //注册两个事件，用于从服务器和客户端监听消息
     //编码解码
     //1.读取版本号，确认是tcp连接还是udp连接
-    char buff[1024];
-    int valid = recv(msg->src_fd, buff, sizeof(buff), 0);
-    for(int i = 0; i < valid; ++i){
-        printf("%x \t", buff[i]);
-        printf("%d \n", buff[i]);
-    }
 
+    while(true){
+        if(msg->stage == 0){
+            struct method_select_request method;
+            int valid = recv(msg->src_fd, (char *)&method, sizeof(method), 0);
+
+            if(method.ver != SOCKS_VERSION){
+                //协议错误
+                printf("协议错误\n");
+                exit(0);
+            }
+
+            if(valid != sizeof(method)){
+                //读取长度错误
+                printf("读取长度错误\n");
+                exit(0);
+            }
+            printf("size of method is %x\n", method.nmethods);
+            printf("%x %x\n", method.ver, method.nmethods);
+            if(method.nmethods == 0){
+                msg->select_method = 0x00;
+                //默认不加密
+            }
+            else{
+                //在剩下255种加密方法中选择一种
+                char select_method;
+                printf("%d\n", method.nmethods);
+                select_method = rand()%method.nmethods;
+                char * methods = new char[method.nmethods];
+                recv(msg->src_fd, methods, sizeof(methods), 0);
+                msg->select_method = methods[select_method];
+                printf("method is %x\n", msg->select_method);
+                delete [] methods;
+            }
+
+            struct method_select_response res_method;
+            res_method.ver = method.ver;
+            res_method.method = msg->select_method;
+
+            valid = send(msg->src_fd, (char *)&res_method, sizeof(res_method), 0);
+
+            if(valid != sizeof(res_method)){
+
+            }
+            msg->stage = 1;
+        }
+        else if(msg->stage == 1){
+            //在 stage = 1 双方握手，确定目标服务器的IP、端口和协议信息
+            struct connect_request recv_req;
+            //从客户端接收信息
+            int valid = recv(msg->src_fd, (char *)&recv_req, sizeof(recv_req), 0);
+            if(valid != sizeof(recv_req)){
+
+            }
+            int address_len;
+            switch(recv_req.atyp){
+                case 0x01:
+                    //IPV4类型
+                    address_len = 4;
+                    break;
+                case 0x03:
+                    char tmpbuff;
+                    valid = recv(msg->src_fd, &tmpbuff, 1, 0);
+                    address_len = tmpbuff;
+                    break;
+                case 0x04:
+                    break;
+            }
+            char * address = new char[address_len + 1];
+
+            valid = recv(msg->src_fd, address, address_len, 0);
+            if(valid != address_len){
+                perror("address len");
+            }
+
+            for(int i = 0; i < address_len; ++i){
+                printf("%x", address[i]);
+            }
+            std::cout << std::endl;
+
+            if(recv_req.atyp == 0x03){
+                //使用域名查询
+                struct hostent * h;
+                h = gethostbyname(address);
+                if(!h){
+                    int i = 0;
+                    while(h->h_addr_list[i] != NULL){
+                        //已经是网络字节序
+                        //msg->dst_addr.sin_addr.s_addr = h->h_addr_list[i];
+                        ++i;
+                        break;
+                    }
+                }
+                else{
+                    //没有查询到目标主机
+                }
+
+            }
+            else{
+                unsigned short port;
+
+                valid = recv(msg->src_fd, (char *)&port, 2, 0);
+
+                printf("src port is %u\n", ntohs(port));
+                printf("src addr is %s\n", inet_ntoa(*((in_addr *)((uint32_t *)address))));
+                //printf("src address is %s\n", inet_ntoa());
+                msg->dst_addr.sin_family = AF_INET;
+                msg->dst_addr.sin_port   = port;
+                msg->dst_addr.sin_addr.s_addr = *((uint32_t *)address);
+                printf("add is %u\n", msg->dst_addr.sin_addr.s_addr);
+                printf("add is %u\n", inet_addr("127.0.0.1"));
+                printf("port is %u\n", port);
+                printf("port is %u\n", htons(8000));
+            }
+
+            //如果没有在这里返回，则认为代理服务器已经获得远端服务器的ip与端口
+            msg->stage = 2;
+        }
+        else if(msg->stage == 2){
+            //连接到远端服务器
+            msg->dst_fd = socket(AF_INET, SOCK_STREAM, 0);
+
+            int valid;
+            int dst_fd;
+
+            if(connect(msg->dst_fd, (struct sockaddr *)&msg->dst_addr, sizeof(msg->dst_addr)) == 0){
+                //如果成功，则向客户端发送成功连接报文
+                struct connect_request resp_req;
+                resp_req.ver = '\x05';
+                resp_req.rep = '\x00';
+                resp_req.rsv = '\x00';
+                resp_req.atyp = msg->atyp;
+
+                valid = send(msg->dst_fd, (char *)&resp_req, 4, 0);
+                std::cout << "msg->dst_fd is " << msg->dst_fd << std::endl;
+                std::cout << "valid is " << valid << std::endl;
+            std::cout << "Program is running at here!" << std::endl;
+                msg->stage = 3;
+            }
+            else{
+                //否则，说明代理服务器无法连接到远端服务器
+
+            }
+        }
+        else if(msg->stage == 3){
+            //说明此时已经连接到远端服务器了，两边的连接已经通畅，此时应该注册4个事件
+            event_new(msg->base, msg->src_fd, EV_READ,  handleReadFromClient, NULL);
+            event_new(msg->base, msg->dst_fd, EV_READ,  handleReadFromServer, NULL);
+        }
+    }
     //switch(buff[0]){
     //    case 0x0:
     //        //不需要密码的情况
     //}
 
 
-    ////建立一个到服务器的连接
-    //int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
-    //struct sockaddr_in dst_addr;
-    //dst_addr.sin_famliy = AF_INET;
-    //dst_addr.sin_port = htons(9999);
-    //dst_addr.sin_addr.s_addr = htonl(INADDR);
 
-    //int dst_fd;
-    //if((dst_fd = connect(socket_fd, (struct sockaddr *)dst_addr, sizeof(sockaddr))) == 0){
     //    int valid = send(msg->dst_fd, buff, sizeof(buff));
     //    //成功连接则将写事件注册到线程中
     //    struct ev_write_server = event_new(msg->base, msg->dst_fd, EV_WRITE, handleWriteToServer,  (void *)msg);
@@ -197,9 +349,9 @@ class Server{
                 socklen_t len = sizeof(client_addr);
                 int accept_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &len);
                 struct message msg;
-                msg.src_addr = &client_addr;
                 msg.base = mainEvent->getBase();
                 msg.src_fd = accept_fd;
+                msg.stage = 0;
                 struct event * ev = event_new(mainEvent->getBase(), accept_fd, EV_READ, handleMainConn, (void *)&msg);
                 event_add(ev, NULL);
                 event_base_dispatch(mainEvent->getBase());
@@ -252,6 +404,7 @@ class Server{
 
 int main(int argc, char ** argv){
     int opt;
+    srand(time(0));
 
     std::string server_ip;
     std::string local_address_ip;
