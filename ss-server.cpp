@@ -15,7 +15,11 @@
 
 
 struct message{
-    struct sockaddr_in *source_addr;
+    struct sockaddr_in *src_addr;
+    struct sockaddr_in *dst_addr;
+    struct event_base * base;
+    int src_fd;
+    int dst_fd;
     //柔性数组
     int len;
     char * data;
@@ -45,18 +49,6 @@ class Event{
         return base;
     }
 
-    void loop(){
-        //event_add(evsignal_new(base, SIGINT, quit, event_self_cbarg()), NULL);
-        //event_base_dispatch(base);
-    }
-
-
-    void startToQuit(){
-        quiting = true;
-        event_base_loopbreak(base);
-        exit(0);
-    }
-
 
     struct event_base *base;
     bool quiting = false;
@@ -73,7 +65,6 @@ void *loopFunc(void * arg){
     //
     //
     //那么，每个线程应该保有一个Event对象！！！！
-    ev->loop();
 };
 
 void * func(void * args){
@@ -124,67 +115,67 @@ class EventThreadPool:std::enable_shared_from_this<EventThreadPool>{
 
 
 
-void handleWork(int fd, short event, void * arg){
-    struct message * msg = (struct message *)arg;
-    //读取从local端传来的消息，并伪装发给服务器
-    //if(existed.find() != existed.end()){
-    if(false){
-        //这一对端口 发送地址、发送端口、目标地址、目标端口的结构体存在，说明它的读和写都有fd,可以直接读和写
-        if(1){
-            //从服务器发来的消息
+//一个连接从它开始创建，就要给他创建一个事件，这个事件随着两端的连接是否断开为标志，而
+//不以其他情况为转移，只要两端的连接还在，那么就不应该断开这个连接
 
-        }
-        else{
-            //从local发来的消息
 
-        }
-    }
-    else{
-        //读取传来的消息并解析
-        //创建新的socket,并与服务器通信
-        struct sockaddr_in *target_addr;
-        int sendfd = socket(AF_INET, SOCK_STREAM, 0);
-        target_addr = msg->source_addr;
-        if(connect(sendfd, (struct sockaddr *)target_addr, sizeof(struct sockaddr)) < 0){
-            perror("connect");
-            exit(1);
-        }
-        else{
-            int validLen = write(sendfd, msg->data, strlen(msg->data));
-            printf("%d chars is written!\n", validLen);
-        }
-    }
+
+void handleReadFromClient(){
+
 }
 
+void handleWriteToClient(){
 
+}
+
+void handleReadFromServer(){
+
+}
+void handleWriteToServer(){
+
+}
 
 void handleMainConn(int fd, short event, void * arg){
-    struct source_addr_base * t = (struct source_addr_base *)arg;
-    struct event_base *base = t->base;
+    struct message * msg = (struct message *)arg;
+    //注册两个事件，用于从服务器和客户端监听消息
+    //编码解码
+    //1.读取版本号，确认是tcp连接还是udp连接
+    char buff[1024];
+    int valid = recv(msg->src_fd, buff, sizeof(buff), 0);
+    for(int i = 0; i < valid; ++i){
+        printf("%x \t", buff[i]);
+        printf("%d \n", buff[i]);
+    }
 
-    //此时应该在主线程中监听，如果监听到事件到来，则解析并把事件派遣到工作线程
-    char buff[2048];
-    bzero(buff, '\0');
-    int validLen = read(fd, buff, sizeof(buff));
-    struct message msg;
-    msg.source_addr = t->source_addr;
-    msg.len = validLen;
-    msg.data = (char*)buff;
+    //switch(buff[0]){
+    //    case 0x0:
+    //        //不需要密码的情况
+    //}
 
-    struct event *ev = event_new(base, fd, EV_READ, handleWork, (void *)&msg);
 
-    event_add(ev, NULL);
-    event_base_dispatch(base);
+    ////建立一个到服务器的连接
+    //int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    //struct sockaddr_in dst_addr;
+    //dst_addr.sin_famliy = AF_INET;
+    //dst_addr.sin_port = htons(9999);
+    //dst_addr.sin_addr.s_addr = htonl(INADDR);
 
-    std::cout << "Program is running at here!" << std::endl;
-    std::cout << "Program is running at here!" << std::endl;
-    std::cout << "Program is running at here!" << std::endl;
-    std::cout << "Program is running at here!" << std::endl;
-    std::cout << "Program is running at here!" << std::endl;
-}
+    //int dst_fd;
+    //if((dst_fd = connect(socket_fd, (struct sockaddr *)dst_addr, sizeof(sockaddr))) == 0){
+    //    int valid = send(msg->dst_fd, buff, sizeof(buff));
+    //    //成功连接则将写事件注册到线程中
+    //    struct ev_write_server = event_new(msg->base, msg->dst_fd, EV_WRITE, handleWriteToServer,  (void *)msg);
+    //    struct ev_read_server  = event_new(msg->base, msg->dst_fd, EV_READ,  handleReadFromServer, (void *)msg);
 
-void func(int fd, short event, void * arg){
-        std::cout << "Program is running at here!" << std::endl;
+    //    struct ev_write_client = event_new(msg->base, msg->src_fd, EV_WRITE, handleWriteToClient,  (void *)msg);
+    //    struct ev_read_client  = event_new(msg->base, msg->src_fd, EV_READ,  handleReadFromClient, (void *)msg);
+
+    //}
+    //else{
+    //    //从客户端发来的连接没有成功，应该向客户端发送连接不可达的报文
+    //    close();
+    //}
+
 }
 
 class Server{
@@ -200,11 +191,20 @@ class Server{
         //创建一个线程池，用于处理来自于主线程的消息
         void start(){
             struct sockaddr_in source_addr;
-            int accept_fd = listenPort(source_addr);
-            struct event * ev = event_new(mainEvent->getBase(), accept_fd, EV_WRITE|EV_READ|EV_PERSIST, handleMainConn,(void *) & source_addr);
-            event_add(ev, NULL);
-            event_base_dispatch(mainEvent->getBase());
-            //应该在主线程中注册一个signal事件，用于结束主线程的左右事件
+            int socket_fd = listenPort(source_addr);
+            while(true){
+                struct sockaddr_in client_addr;
+                socklen_t len = sizeof(client_addr);
+                int accept_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &len);
+                struct message msg;
+                msg.src_addr = &client_addr;
+                msg.base = mainEvent->getBase();
+                msg.src_fd = accept_fd;
+                struct event * ev = event_new(mainEvent->getBase(), accept_fd, EV_READ, handleMainConn, (void *)&msg);
+                event_add(ev, NULL);
+                event_base_dispatch(mainEvent->getBase());
+                //应该在主线程中注册一个signal事件，用于结束主线程的左右事件
+            }
         }
 
         int listenPort(struct sockaddr_in &source_addr){
@@ -221,27 +221,17 @@ class Server{
             serverAddr.sin_port = htons(7000);
             serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-
-
             if(bind(socket_fd, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) == -1){
                 perror("bind");
                 exit(1);
             }
+
             if(listen(socket_fd, 2048) == -1){
                 perror("listen");
                 exit(1);
             }
 
-            socklen_t len = sizeof(source_addr);
-
-            int accept_fd = accept(socket_fd, (struct sockaddr*)&source_addr, &len);
-
-            if(accept_fd < 0){
-                perror("accept error");
-                exit(1);
-            }
-            //此处就结束了，将accept操作放到主线程的那个循环中去
-            return accept_fd;
+            return socket_fd;
         }
 
     private:
@@ -371,7 +361,6 @@ int main(int argc, char ** argv){
     //  事件的处理用来监听主线程上端口信息的变化情
     //  况，并把信息传递给一个全局对象,这个对象是
     //  epoll的包装
-    mainEvent.loop();
 
 
     return 0;

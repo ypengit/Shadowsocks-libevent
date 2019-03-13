@@ -7,6 +7,7 @@
 #include <string.h>
 #include <iostream>
 #include <sys/epoll.h>
+#include <fcntl.h>
 
 
 #define SERVER_ADDRESS "0.0.0.0"
@@ -50,6 +51,7 @@ int main(int argc, char ** argv){
 
     std::cout << socket_fd <<std::endl;
 
+    fcntl(socket_fd, F_SETFL, fcntl(socket_fd, F_GETFL, 0) | O_NONBLOCK);
     //fd_set rfds;
     //FD_ZERO(&rfds);
     //FD_SET(accept_fd, &rfds);
@@ -70,7 +72,6 @@ int main(int argc, char ** argv){
             memset(buff, '\0', sizeof(buff));
             int size = read(accept_fd, buff, sizeof(buff));
             printf("%s", buff);
-            std::cout << epoll_wait_res << std::endl;
         }
     }
     close(accept_fd);
