@@ -1,4 +1,5 @@
 import socket
+import time
 
 s = socket.socket()
 s.connect(("127.0.0.1", 7000))
@@ -13,6 +14,10 @@ print "send 2 succed"
 a = s.recv(4)
 for i in a:
     print("%x"%ord(i))
+
+for i in range(1000):
+    s.send(i * "a", 0);
+    time.sleep(1)
 s.close()
 
 

@@ -13,22 +13,24 @@ EventThreadPool	ss-server.cpp	/^class EventThreadPool:std::enable_shared_from_th
 PORT	client.cpp	11;"	d	file:
 PORT	server.cpp	14;"	d	file:
 SERVER_ADDRESS	server.cpp	13;"	d	file:
+SOCKS_VERSION	ss-server.cpp	21;"	d	file:
 Server	ss-server.cpp	/^        Server(std::string server_ip, int server_port, std::string password, std::string method, Event * mainEvent, int threadNum):$/;"	f	class:Server
 Server	ss-server.cpp	/^class Server{$/;"	c	file:
 TRANSMIT_TYPE	client.cpp	12;"	d	file:
 TRANSMIT_TYPE	server.cpp	15;"	d	file:
-a	client_test.py	/^    a = "                                                      "$/;"	v
-a	client_test.py	/^    a = s.recv(1)$/;"	v
+a	client_test.py	/^a = s.recv(2)$/;"	v
+a	client_test.py	/^a = s.recv(4)$/;"	v
+atyp	ss-server.cpp	/^    char atyp;$/;"	m	struct:message	file:
+atyp	ss-server.h	/^    char atyp;$/;"	m	struct:connect_request
 atyp	ss-server.h	/^    char atyp;$/;"	m	struct:recv_data_request
-atyp	ss-server.h	/^    char atyp;$/;"	m	struct:send_data_request
 base	ss-server.cpp	/^    struct event_base * base;$/;"	m	struct:message	typeref:struct:message::event_base	file:
 base	ss-server.cpp	/^    struct event_base * base;$/;"	m	struct:source_addr_base	typeref:struct:source_addr_base::event_base	file:
 base	ss-server.cpp	/^    struct event_base *base;$/;"	m	class:Event	typeref:struct:Event::event_base	file:
 cmd	ss-server.h	/^    char cmd;$/;"	m	struct:recv_data_request
-cmd	ss-server.h	/^    char cmd;$/;"	m	struct:send_data_request
 communicateMethod	ss-server.cpp	/^        int communicateMethod;$/;"	m	class:Server	file:
+connect_request	ss-server.h	/^struct connect_request{$/;"	s
 data	ss-server.cpp	/^    char * data;$/;"	m	struct:message	file:
-dst_addr	ss-server.cpp	/^    struct sockaddr_in *dst_addr;$/;"	m	struct:message	typeref:struct:message::sockaddr_in	file:
+dst_addr	ss-server.cpp	/^    struct sockaddr_in dst_addr;$/;"	m	struct:message	typeref:struct:message::sockaddr_in	file:
 dst_fd	ss-server.cpp	/^    int dst_fd;$/;"	m	struct:message	file:
 ev	ss-server.cpp	/^        Event ev;$/;"	m	class:EventThread	file:
 eventThreadPool	ss-server.cpp	/^        EventThreadPool eventThreadPool;$/;"	m	class:Server	file:
@@ -36,48 +38,53 @@ events	ss-server.cpp	/^        std::vector<struct event_base *> events;$/;"	m	cl
 func	ss-server.cpp	/^void * func(void * args){$/;"	f
 getBase	ss-server.cpp	/^    struct event_base * getBase(){$/;"	f	class:Event
 handleMainConn	ss-server.cpp	/^void handleMainConn(int fd, short event, void * arg){$/;"	f
-handleReadFromClient	ss-server.cpp	/^void handleReadFromClient(){$/;"	f
-handleReadFromServer	ss-server.cpp	/^void handleReadFromServer(){$/;"	f
+handleReadFromClient	ss-server.cpp	/^void handleReadFromClient(int fd, short event, void * arg){$/;"	f
+handleReadFromServer	ss-server.cpp	/^void handleReadFromServer(int fd, short event, void * arg){$/;"	f
+handleStage2	ss-server.cpp	/^void handleStage2(int fd, short event, void * arg){$/;"	f
 handleWriteToClient	ss-server.cpp	/^void handleWriteToClient(){$/;"	f
 handleWriteToServer	ss-server.cpp	/^void handleWriteToServer(){$/;"	f
 len	ss-server.cpp	/^    int len;$/;"	m	struct:message	file:
 listenPort	ss-server.cpp	/^        int listenPort(struct sockaddr_in &source_addr){$/;"	f	class:Server
 loopFunc	ss-server.cpp	/^void *loopFunc(void * arg){$/;"	f
 main	client.cpp	/^int main(int argc, char ** argv){$/;"	f
+main	connect.cpp	/^int main(){$/;"	f
+main	remote.cpp	/^int main(){$/;"	f
 main	server.cpp	/^int main(int argc, char ** argv){$/;"	f
 main	ss-server.cpp	/^int main(int argc, char ** argv){$/;"	f
 mainEvent	ss-server.cpp	/^        Event * mainEvent;$/;"	m	class:Server	file:
 message	ss-server.cpp	/^struct message{$/;"	s	file:
 method	ss-server.cpp	/^        std::string method;$/;"	m	class:Server	file:
+method	ss-server.h	/^    char method;$/;"	m	struct:method_select_response
 method_select_request	ss-server.h	/^struct method_select_request{$/;"	s
 method_select_response	ss-server.h	/^struct method_select_response{$/;"	s
 methods	ss-server.h	/^    char methods[0];$/;"	m	struct:method_select_request
 nmethods	ss-server.h	/^    char nmethods;$/;"	m	struct:method_select_request
-nmethods	ss-server.h	/^    char nmethods;$/;"	m	struct:method_select_response
 password	ss-server.cpp	/^        std::string password;$/;"	m	class:Server	file:
 quit	ss-server.cpp	/^        bool quit;$/;"	m	class:Server	file:
 quit	ss-server.cpp	/^void quit(int fd, short event, void * arg){$/;"	f
 quiting	ss-server.cpp	/^    bool quiting = false;$/;"	m	class:Event	file:
+read_cb	remote.cpp	/^void read_cb(int fd, short event, void * arg){$/;"	f
 recv_data_request	ss-server.h	/^struct recv_data_request{$/;"	s
+rep	ss-server.h	/^    char rep;$/;"	m	struct:connect_request
+rsv	ss-server.h	/^    char rsv;$/;"	m	struct:connect_request
 rsv	ss-server.h	/^    char rsv;$/;"	m	struct:recv_data_request
-rsv	ss-server.h	/^    char rsv;$/;"	m	struct:send_data_request
 s	client_test.py	/^s = socket.socket()$/;"	v
-send_data_request	ss-server.h	/^struct send_data_request{$/;"	s
+select_method	ss-server.cpp	/^    char select_method;$/;"	m	struct:message	file:
 server_ip	ss-server.cpp	/^        std::string server_ip;$/;"	m	class:Server	file:
 server_port	ss-server.cpp	/^        int server_port;$/;"	m	class:Server	file:
 socket_fd	ss-server.cpp	/^        int socket_fd;$/;"	m	class:Server	file:
 source_addr	ss-server.cpp	/^    struct sockaddr_in * source_addr;$/;"	m	struct:source_addr_base	typeref:struct:source_addr_base::sockaddr_in	file:
 source_addr_base	ss-server.cpp	/^struct source_addr_base{$/;"	s	file:
-src_addr	ss-server.cpp	/^    struct sockaddr_in *src_addr;$/;"	m	struct:message	typeref:struct:message::sockaddr_in	file:
 src_fd	ss-server.cpp	/^    int src_fd;$/;"	m	struct:message	file:
 stage	ss-server.cpp	/^    char stage;$/;"	m	struct:message	file:
 start	ss-server.cpp	/^        void start(){$/;"	f	class:Server
 t	ss-server.cpp	/^        pthread_t t;$/;"	m	class:EventThread	file:
 threadNum	ss-server.cpp	/^        int threadNum;$/;"	m	class:Server	file:
 vec	ss-server.cpp	/^    std::vector<std::shared_ptr<EventThread>> vec;$/;"	m	class:EventThreadPool	file:
+ver	ss-server.h	/^    char ver;$/;"	m	struct:connect_request
 ver	ss-server.h	/^    char ver;$/;"	m	struct:method_select_request
 ver	ss-server.h	/^    char ver;$/;"	m	struct:method_select_response
 ver	ss-server.h	/^    char ver;$/;"	m	struct:recv_data_request
-ver	ss-server.h	/^    char ver;$/;"	m	struct:send_data_request
+write_cb	connect.cpp	/^void write_cb(int fd, short event, void * arg){$/;"	f
 ~EventThread	ss-server.cpp	/^        ~EventThread(){$/;"	f	class:EventThread
 ~EventThreadPool	ss-server.cpp	/^    ~EventThreadPool(){$/;"	f	class:EventThreadPool

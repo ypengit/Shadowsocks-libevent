@@ -30,13 +30,18 @@ struct message{
     int src_fd;
     int dst_fd;
     //柔性数组
-    int len;
-    char * data;
+    short valid;
+    char * buff;
+    message(){
+        //应当从内存池中申请一块区域
+        valid = 0;
+        buff = new char[1460];
+    }
+    ~message(){
+        delete [] buff;
+    }
 };
 
-void quit(int fd, short event, void * arg){
-    exit(0);
-}
 
 
 struct source_addr_base{
@@ -130,21 +135,32 @@ class EventThreadPool:std::enable_shared_from_this<EventThreadPool>{
 
 
 void handleReadFromClient(int fd, short event, void * arg){
+    struct message *msg = (struct message *)arg;
+    printf("Program is running here!\n");
+    msg->valid = recv(msg->src_fd, msg->buff, 1460, 0);
+    printf("Program is running here!\n");
+    if(msg->valid > 0){
+        msg->valid = send(msg->dst_fd, msg->buff, msg->valid, 0);
+        printf("%d\n", msg->valid);
+        if(msg->valid == -1){
+            //发送失败
 
+        }
+    }
 }
 
 void handleReadFromServer(int fd, short event, void * arg){
+    struct message *msg = (struct message *)arg;
+    msg->valid = recv(msg->dst_fd, msg->buff, 1460, 0);
+    if(msg->valid > 0){
+        msg->valid = send(msg->src_fd, msg->buff, msg->valid, 0);
+        if(msg->valid == -1){
+            //发送失败
+
+        }
+    }
 
 }
-
-void handleWriteToClient(){
-
-}
-
-void handleWriteToServer(){
-
-}
-
 
 
 
@@ -207,10 +223,11 @@ void handleMainConn(int fd, short event, void * arg){
             //在 stage = 1 双方握手，确定目标服务器的IP、端口和协议信息
             struct connect_request recv_req;
             //从客户端接收信息
-            int valid = recv(msg->src_fd, (char *)&recv_req, sizeof(recv_req), 0);
+            int valid = recv(msg->src_fd, (char *)&recv_req, 4, 0);
             if(valid != sizeof(recv_req)){
 
             }
+            msg->atyp = recv_req.atyp;
             int address_len;
             switch(recv_req.atyp){
                 case 0x01:
@@ -266,10 +283,7 @@ void handleMainConn(int fd, short event, void * arg){
                 msg->dst_addr.sin_family = AF_INET;
                 msg->dst_addr.sin_port   = port;
                 msg->dst_addr.sin_addr.s_addr = *((uint32_t *)address);
-                printf("add is %u\n", msg->dst_addr.sin_addr.s_addr);
-                printf("add is %u\n", inet_addr("127.0.0.1"));
-                printf("port is %u\n", port);
-                printf("port is %u\n", htons(8000));
+
             }
 
             //如果没有在这里返回，则认为代理服务器已经获得远端服务器的ip与端口
@@ -281,8 +295,10 @@ void handleMainConn(int fd, short event, void * arg){
 
             int valid;
             int dst_fd;
+            printf("%x\n", msg->dst_addr.sin_addr.s_addr);
+            printf("%x\n", msg->dst_addr.sin_port);
 
-            if(connect(msg->dst_fd, (struct sockaddr *)&msg->dst_addr, sizeof(msg->dst_addr)) == 0){
+            if(0 == connect(msg->dst_fd, (struct sockaddr *)&(msg->dst_addr), sizeof(msg->dst_addr))){
                 //如果成功，则向客户端发送成功连接报文
                 struct connect_request resp_req;
                 resp_req.ver = '\x05';
@@ -290,44 +306,32 @@ void handleMainConn(int fd, short event, void * arg){
                 resp_req.rsv = '\x00';
                 resp_req.atyp = msg->atyp;
 
-                valid = send(msg->dst_fd, (char *)&resp_req, 4, 0);
+                printf("atyp is %x\n", msg->atyp);
+
+                char m[] = "message";
+                valid = send(msg->src_fd, (char *)&resp_req, sizeof(resp_req), 0);
+
                 std::cout << "msg->dst_fd is " << msg->dst_fd << std::endl;
                 std::cout << "valid is " << valid << std::endl;
-            std::cout << "Program is running at here!" << std::endl;
                 msg->stage = 3;
             }
             else{
-                //否则，说明代理服务器无法连接到远端服务器
 
             }
         }
         else if(msg->stage == 3){
             //说明此时已经连接到远端服务器了，两边的连接已经通畅，此时应该注册4个事件
-            event_new(msg->base, msg->src_fd, EV_READ,  handleReadFromClient, NULL);
-            event_new(msg->base, msg->dst_fd, EV_READ,  handleReadFromServer, NULL);
+            struct event * ev1 = event_new(msg->base, msg->src_fd, EV_READ|EV_PERSIST,  handleReadFromClient, NULL);
+            struct event * ev2 = event_new(msg->base, msg->dst_fd, EV_READ|EV_PERSIST,  handleReadFromServer, NULL);
+            event_add(ev1, NULL);
+            event_add(ev2, NULL);
+            event_base_dispatch(msg->base);
+            msg->stage = 4;
+        }
+        else if(msg->stage == 4){
+            break;
         }
     }
-    //switch(buff[0]){
-    //    case 0x0:
-    //        //不需要密码的情况
-    //}
-
-
-
-    //    int valid = send(msg->dst_fd, buff, sizeof(buff));
-    //    //成功连接则将写事件注册到线程中
-    //    struct ev_write_server = event_new(msg->base, msg->dst_fd, EV_WRITE, handleWriteToServer,  (void *)msg);
-    //    struct ev_read_server  = event_new(msg->base, msg->dst_fd, EV_READ,  handleReadFromServer, (void *)msg);
-
-    //    struct ev_write_client = event_new(msg->base, msg->src_fd, EV_WRITE, handleWriteToClient,  (void *)msg);
-    //    struct ev_read_client  = event_new(msg->base, msg->src_fd, EV_READ,  handleReadFromClient, (void *)msg);
-
-    //}
-    //else{
-    //    //从客户端发来的连接没有成功，应该向客户端发送连接不可达的报文
-    //    close();
-    //}
-
 }
 
 class Server{
