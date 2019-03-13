@@ -27,6 +27,7 @@ struct message{
     char stage;
     char select_method;
     char atyp;
+    char rep;
     int src_fd;
     int dst_fd;
     short valid;
@@ -38,6 +39,7 @@ struct message{
         //应当从内存池中申请一块区域
         valid = 0;
         buff = new char[1460];
+        bzero(buff, 1460);
     }
     ~message(){
         delete [] buff;
@@ -64,7 +66,6 @@ class Event{
     struct event_base * getBase(){
         return base;
     }
-
 
     struct event_base *base;
     bool quiting = false;
@@ -95,6 +96,9 @@ class EventThread{
         ~EventThread(){
             pthread_join(t, NULL);
         }
+        struct event_base* get_base(){
+            return ev.base;
+        }
         Event ev;
         pthread_t t;
 };
@@ -103,12 +107,12 @@ class EventThread{
 
 
 
-class EventThreadPool:std::enable_shared_from_this<EventThreadPool>{
+class EventThreadPool{
     public:
     EventThreadPool(int num){
         for(int i = 0; i < num; ++i){
-            std::shared_ptr<EventThread> th(new EventThread);
-            vec.push_back(th);
+            EventThread th;
+            vec.push_back(&th);
         }
     }
 
@@ -116,7 +120,14 @@ class EventThreadPool:std::enable_shared_from_this<EventThreadPool>{
 
     }
 
-    std::vector<std::shared_ptr<EventThread>> vec;
+    std::vector<struct event_base*> get_bases(){
+        std::vector<struct event_base*> res;
+        for(EventThread *t:vec){
+            res.push_back(t->get_base());
+        }
+    }
+
+    std::vector<EventThread*> vec;
 };
 
 
@@ -226,46 +237,45 @@ void handleMainConn(int fd, short event, void * arg){
 
     while(true){
         if(msg->stage == 0){
-            struct method_select_request method;
-            msg->valid = recv(msg->src_fd, (char *)&method, sizeof(method), 0);
 
-            if(method.ver != SOCKS_VERSION){
+
+            //*1*:接收版本号、加密方法数目和加密方法
+            //*2*:从加密方法中，选择一项加密方法，并告知客户端
+            struct ver_method_select header;
+            msg->valid = recv(msg->src_fd, (char *)&header, 2, 0);
+
+            if((header.ver != SOCKS_VERSION) || (msg->valid != 2)){
                 //协议错误,根据sock5协议标准，此情况下无需回答
-                close(fd, msg);
+                close_m_fd(msg->src_fd, msg);
                 break;
             }
 
-            if(valid != sizeof(method)){
-                //读取长度错误
-                printf("读取长度错误\n");
-                exit(0);
-            }
-            printf("size of method is %x\n", method.nmethods);
-            printf("%x %x\n", method.ver, method.nmethods);
-            if(method.nmethods == 0){
-                msg->select_method = 0x00;
+            //选择加密方式
+            if(header.method == 0){
                 //默认不加密
+                msg->select_method = 0x00;
             }
             else{
-                //在剩下255种加密方法中选择一种
-                char select_method;
-                printf("%d\n", method.nmethods);
-                select_method = rand()%method.nmethods;
-                char * methods = new char[method.nmethods];
-                recv(msg->src_fd, methods, sizeof(methods), 0);
-                msg->select_method = methods[select_method];
-                printf("method is %x\n", msg->select_method);
+                //在剩下255种加密方法中选择一种,长度也可能不是255，由第二字节决定
+                msg->select_method = rand()%header.method;
+                char * methods = new char[header.method];
+                msg->valid = recv(msg->src_fd, methods, header.method, 0);
+                if(msg->valid != header.method){
+                    close_m_fd(msg->src_fd, msg);
+                    break;
+                }
+                msg->select_method = methods[msg->select_method];
                 delete [] methods;
             }
 
-            struct method_select_response res_method;
-            res_method.ver = method.ver;
-            res_method.method = msg->select_method;
+            //将选择出来的加密方式传给客户端
+            header.method = msg->select_method;
 
-            valid = send(msg->src_fd, (char *)&res_method, sizeof(res_method), 0);
+            msg->valid = send(msg->src_fd, (char *)&header, 2, 0);
 
-            if(valid != sizeof(res_method)){
-
+            if(msg->valid != 2){
+                close_m_fd(msg->src_fd, msg);
+                break;
             }
             msg->stage = 1;
         }
@@ -273,37 +283,46 @@ void handleMainConn(int fd, short event, void * arg){
             //在 stage = 1 双方握手，确定目标服务器的IP、端口和协议信息
             struct connect_request recv_req;
             //从客户端接收信息
-            int valid = recv(msg->src_fd, (char *)&recv_req, 4, 0);
-            if(valid != sizeof(recv_req)){
-
+            msg->valid = recv(msg->src_fd, (char *)&recv_req, 4, 0);
+            if(msg->valid != 4){
+                close_m_fd(msg->src_fd, msg);
+                break;
             }
             msg->atyp = recv_req.atyp;
-            int address_len;
+
+            //这里最长的是域名，可能有128位，而IPV4与IPV6都只有几位，
+            //用char足矣,且方便读取域名信息
+            char address_len;
             switch(recv_req.atyp){
                 case 0x01:
                     //IPV4类型
                     address_len = 4;
                     break;
                 case 0x03:
-                    char tmpbuff;
-                    valid = recv(msg->src_fd, &tmpbuff, 1, 0);
-                    address_len = tmpbuff;
+                    msg->valid = recv(msg->src_fd, &address_len, 1, 0);
                     break;
                 case 0x04:
                     break;
             }
-            char * address = new char[address_len + 1];
+            char * address = new char[address_len];
 
-            valid = recv(msg->src_fd, address, address_len, 0);
-            if(valid != address_len){
-                perror("address len");
+            msg->valid = recv(msg->src_fd, address, address_len, 0);
+
+            if(msg->valid != address_len){
+                close_m_fd(msg->src_fd, msg);
+                break;
             }
 
-            for(int i = 0; i < address_len; ++i){
-                printf("%x", address[i]);
-            }
-            std::cout << std::endl;
 
+            unsigned short port;
+            msg->valid = recv(msg->src_fd, (char *)&port, 2, 0);
+
+            if(msg->valid != 2){
+                close_m_fd(msg->src_fd, msg);
+                break;
+            }
+
+            //域名查找较为复杂，稍后完成[TODO]
             if(recv_req.atyp == 0x03){
                 //使用域名查询
                 struct hostent * h;
@@ -322,31 +341,23 @@ void handleMainConn(int fd, short event, void * arg){
                 }
 
             }
-            else{
-                unsigned short port;
-
-                valid = recv(msg->src_fd, (char *)&port, 2, 0);
-
-                printf("src port is %u\n", ntohs(port));
-                printf("src addr is %s\n", inet_ntoa(*((in_addr *)((uint32_t *)address))));
-                //printf("src address is %s\n", inet_ntoa());
+            else if(recv_req.atyp == 0x01){
+                //传递过来的数据都是网络字节序，可以直接转义使用,其他无论是
+                //IPV4还是IPV6都可以直接设置传输
                 msg->dst_addr.sin_family = AF_INET;
                 msg->dst_addr.sin_port   = port;
                 msg->dst_addr.sin_addr.s_addr = *((uint32_t *)address);
+            }
+            else{
+                //IPV6稍后完成[TODO]
 
             }
-
             //如果没有在这里返回，则认为代理服务器已经获得远端服务器的ip与端口
             msg->stage = 2;
         }
         else if(msg->stage == 2){
             //连接到远端服务器
             msg->dst_fd = socket(AF_INET, SOCK_STREAM, 0);
-
-            int valid;
-            int dst_fd;
-            printf("%x\n", msg->dst_addr.sin_addr.s_addr);
-            printf("%x\n", msg->dst_addr.sin_port);
 
             if(0 == connect(msg->dst_fd, (struct sockaddr *)&(msg->dst_addr), sizeof(msg->dst_addr))){
                 //如果成功，则向客户端发送成功连接报文
@@ -356,24 +367,28 @@ void handleMainConn(int fd, short event, void * arg){
                 resp_req.rsv = '\x00';
                 resp_req.atyp = msg->atyp;
 
-                printf("atyp is %x\n", msg->atyp);
+                msg->valid = send(msg->src_fd, (char *)&resp_req, 4, 0);
 
-                valid = send(msg->src_fd, (char *)&resp_req, sizeof(resp_req), 0);
+                if(msg->valid != 4){
+                    close_m_fd(msg->src_fd, msg);
+                    break;
+                }
 
-                std::cout << "msg->dst_fd is " << msg->dst_fd << std::endl;
-                std::cout << "valid is " << valid << std::endl;
                 msg->stage = 3;
             }
             else{
-                perror("connect");
-                exit(1);
+                //与客户端连接成功，但与远端服务器连接不成功,仅需要关闭客户端的链接，远端服务器的还未建立起来
+                //此时不能简单关闭，因为还在连接建立阶段，故要根据情况返回状态码
+                //[TODO]
+                break;
             }
         }
         else if(msg->stage == 3){
-            char m[] = "message";
-            msg->valid = send(msg->dst_fd, m, sizeof(m), 0);
 
-            //说明此时已经连接到远端服务器了，两边的连接已经通畅，此时应该注册4个事件
+            //说明此时已经连接到远端服务器了，两边的连接已经通畅，此时应该注册2个事件
+            //每个时间应该能够知道它能否被读，已经它是否被关闭，事件应该是常备事件
+            //ev1 负责从客户端读取数据发送到远端服务器
+            //ev2 负责从远端服务器读取数据发送到客户端
             struct event * ev1 = event_new(msg->base, msg->src_fd, EV_READ|EV_PERSIST|EV_CLOSED,  handleReadFromClient, (void *)msg);
             struct event * ev2 = event_new(msg->base, msg->dst_fd, EV_READ|EV_PERSIST|EV_CLOSED,  handleReadFromServer, (void *)msg);
 
@@ -383,11 +398,12 @@ void handleMainConn(int fd, short event, void * arg){
 
             event_add(ev1, NULL);
             event_add(ev2, NULL);
-            event_base_dispatch(msg->base);
+
+            //这里很重要，不能使用event_base_dispatch，因为要及时返回，否则事件集很可能阻塞在这里，直到ev1,ev2各调用一次
+            event_base_loop(msg->base, EVLOOP_NONBLOCK);
             msg->stage = 4;
-        }
-        else if(msg->stage == 4){
             break;
+            //第四个状态即为已经分配完全，不用再干预,它的撤销停止都放在子线程中执行
         }
     }
 }
@@ -397,29 +413,39 @@ class Server{
         //初始化服务器信息
         Server(std::string server_ip, int server_port, std::string password, std::string method, Event * mainEvent, int threadNum):
             eventThreadPool(threadNum),
-            mainEvent(mainEvent)
+            mainEvent(mainEvent),
+            bases(eventThreadPool.get_bases())
         {
 
         }
 
         //创建一个线程池，用于处理来自于主线程的消息
         void start(){
+            printf("Program is running here!\n");
             struct sockaddr_in source_addr;
             int socket_fd = listenPort(source_addr);
+            //这里要循环，以在主端口上监听，如果有事件到来，那么
             while(true){
+                struct message msg;
                 struct sockaddr_in client_addr;
                 socklen_t len = sizeof(client_addr);
-                int accept_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &len);
-                struct message msg;
+                msg.src_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &len);
+
+                //使用小根堆，获得各个线程的负载情况，找到那些正在处理事件少的线程，分配给新到来的事件
                 msg.base = mainEvent->getBase();
-                msg.src_fd = accept_fd;
                 msg.stage = 0;
-                struct event * ev = event_new(msg.base, accept_fd, EV_READ, handleMainConn, (void *)&msg);
-                msg.ev_m = ev;
-                event_add(ev, NULL);
-                event_base_dispatch(mainEvent->getBase());
-                //应该在主线程中注册一个signal事件，用于结束主线程的左右事件
+
+
+                //仅注册一次，分发给子线程处理，它的所有解析、传送、处理和关闭都交给子线程执行
+                msg.ev_m = event_new(msg.base, msg.src_fd, EV_READ, handleMainConn, (void *)&msg);
+                event_add(msg.ev_m, NULL);
+                event_base_dispatch(msg.base);
+                //应该在主线程中注册一个signal事件，用于结束所有存在的事件[TODO]
             }
+        }
+
+        struct event_base * get_low_load_base(){
+
         }
 
         int listenPort(struct sockaddr_in &source_addr){
@@ -429,9 +455,6 @@ class Server{
 
             bzero(&serverAddr, sizeof(serverAddr));
 
-            //serverAddr.sin_family = AF_INET;
-            //serverAddr.sin_port = htons(server_port);
-            //serverAddr.sin_addr.s_addr = htonl(server_ip.c_str());
             serverAddr.sin_family = AF_INET;
             serverAddr.sin_port = htons(7000);
             serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -462,6 +485,7 @@ class Server{
         int socket_fd;
         //小根堆线程负载均衡
         std::vector<struct event_base *> events;
+        std::vector<struct event_base*> bases;
 };
 
 
