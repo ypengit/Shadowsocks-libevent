@@ -16,7 +16,7 @@ for i in a:
     print("%x"%ord(i))
 
 for i in range(1000):
-    s.send(i * "a", 0);
+    s.send(i * "a" + '\n', 0);
     time.sleep(1)
 s.close()
 

@@ -29,8 +29,10 @@ struct message{
     char atyp;
     int src_fd;
     int dst_fd;
-    //柔性数组
     short valid;
+    struct event *ev1;
+    struct event *ev2;
+    struct event *ev_m;
     char * buff;
     message(){
         //应当从内存池中申请一块区域
@@ -132,57 +134,105 @@ class EventThreadPool:std::enable_shared_from_this<EventThreadPool>{
 //一个连接从它开始创建，就要给他创建一个事件，这个事件随着两端的连接是否断开为标志，而
 //不以其他情况为转移，只要两端的连接还在，那么就不应该断开这个连接
 
+void close_fd(int fd, struct message *msg){
+    event_del(msg->ev1);
+    event_del(msg->ev2);
+    close(fd);
+}
 
 
 void handleReadFromClient(int fd, short event, void * arg){
     struct message *msg = (struct message *)arg;
-    printf("Program is running here!\n");
-    msg->valid = recv(msg->src_fd, msg->buff, 1460, 0);
-    printf("Program is running here!\n");
-    if(msg->valid > 0){
-        msg->valid = send(msg->dst_fd, msg->buff, msg->valid, 0);
-        printf("%d\n", msg->valid);
-        if(msg->valid == -1){
-            //发送失败
 
+    if(event & EV_READ){
+        //以太网最大MTU为1500,IP头部20字节，TCP头部20字节
+        msg->valid = recv(fd, msg->buff, 1460, 0);
+        if(msg->valid > 0){
+            printf("%s", msg->buff);
+            msg->valid = send(msg->dst_fd, msg->buff, msg->valid, 0);
+            if(msg->valid == -1){
+                //向服务器发送失败,删除本事件,并向客户端报告这个状态码,关闭客户端的连接
+                close_fd(msg->src_fd, msg);
+                return;
+            }
+            else{
+                //只对那一部分被使用过的进行重置
+                bzero(msg->buff, msg->valid);
+            }
         }
+        else if(msg->valid == -1){
+            //虽然客户端显示有数据，但读取数据错误，应该关闭服务器的连接
+            close_fd(msg->dst_fd, msg);
+            return;
+        }
+    }
+    else if(event & EV_CLOSED){
+        //如果此时检测到关闭，仍旧是消去事件，并关闭另一个fd
+        close_fd(msg->dst_fd, msg);
+        return;
     }
 }
 
 void handleReadFromServer(int fd, short event, void * arg){
     struct message *msg = (struct message *)arg;
-    msg->valid = recv(msg->dst_fd, msg->buff, 1460, 0);
-    if(msg->valid > 0){
-        msg->valid = send(msg->src_fd, msg->buff, msg->valid, 0);
-        if(msg->valid == -1){
-            //发送失败
 
+    if(event & EV_READ){
+        //以太网最大MTU为1500,IP头部20字节，TCP头部20字节
+        msg->valid = recv(fd, msg->buff, 1460, 0);
+        if(msg->valid > 0){
+            printf("%s", msg->buff);
+            msg->valid = send(msg->src_fd, msg->buff, msg->valid, 0);
+            if(msg->valid == -1){
+                //向服务器发送失败,删除本事件,并向客户端报告这个状态码,关闭客户端的连接
+                close_fd(msg->dst_fd, msg);
+                return;
+            }
+            else{
+                //只对那一部分被使用过的进行重置
+                bzero(msg->buff, msg->valid);
+            }
+        }
+        else if(msg->valid == -1){
+            //虽然客户端显示有数据，但读取数据错误，应该关闭服务器的连接
+            close_fd(msg->src_fd, msg);
+            return;
+        }
+        else if(event & EV_CLOSED){
+            //如果此时检测到关闭，仍旧是消去事件，并关闭另一个fd
+            event_del(msg->ev1);
+            event_del(msg->ev2);
+            close_fd(msg->dst_fd, msg);
+            return;
         }
     }
-
 }
 
 
 
+void close_m_fd(int fd, struct message *msg){
+    event_del(msg->ev_m);
+    close(fd);
+}
+
 void handleMainConn(int fd, short event, void * arg){
-    //msg的stage状态：
-    //stage = 0 表示为初始状态
-    //stage = 1 表示沟通过使用的加密方式
-    //stage = 2 表示沟通完成，双方可以发送数据了
+    /*
+     * msg->stage状态：
+     * 1. stage = 0 表示为初始状态
+     * 2. stage = 1 表示沟通过使用的加密方式
+     * 3. stage = 2 表示沟通完成，双方可以发送数据了
+     * 4. stage = 3 表示事件被注册到基本事件集中
+    */
     struct message * msg = (struct message *)arg;
-    //注册两个事件，用于从服务器和客户端监听消息
-    //编码解码
-    //1.读取版本号，确认是tcp连接还是udp连接
 
     while(true){
         if(msg->stage == 0){
             struct method_select_request method;
-            int valid = recv(msg->src_fd, (char *)&method, sizeof(method), 0);
+            msg->valid = recv(msg->src_fd, (char *)&method, sizeof(method), 0);
 
             if(method.ver != SOCKS_VERSION){
-                //协议错误
-                printf("协议错误\n");
-                exit(0);
+                //协议错误,根据sock5协议标准，此情况下无需回答
+                close(fd, msg);
+                break;
             }
 
             if(valid != sizeof(method)){
@@ -308,7 +358,6 @@ void handleMainConn(int fd, short event, void * arg){
 
                 printf("atyp is %x\n", msg->atyp);
 
-                char m[] = "message";
                 valid = send(msg->src_fd, (char *)&resp_req, sizeof(resp_req), 0);
 
                 std::cout << "msg->dst_fd is " << msg->dst_fd << std::endl;
@@ -316,13 +365,22 @@ void handleMainConn(int fd, short event, void * arg){
                 msg->stage = 3;
             }
             else{
-
+                perror("connect");
+                exit(1);
             }
         }
         else if(msg->stage == 3){
+            char m[] = "message";
+            msg->valid = send(msg->dst_fd, m, sizeof(m), 0);
+
             //说明此时已经连接到远端服务器了，两边的连接已经通畅，此时应该注册4个事件
-            struct event * ev1 = event_new(msg->base, msg->src_fd, EV_READ|EV_PERSIST,  handleReadFromClient, NULL);
-            struct event * ev2 = event_new(msg->base, msg->dst_fd, EV_READ|EV_PERSIST,  handleReadFromServer, NULL);
+            struct event * ev1 = event_new(msg->base, msg->src_fd, EV_READ|EV_PERSIST|EV_CLOSED,  handleReadFromClient, (void *)msg);
+            struct event * ev2 = event_new(msg->base, msg->dst_fd, EV_READ|EV_PERSIST|EV_CLOSED,  handleReadFromServer, (void *)msg);
+
+            //将两事件注册到msg上，在错误或关闭时，可以消去事件
+            msg->ev1 = ev1;
+            msg->ev2 = ev2;
+
             event_add(ev1, NULL);
             event_add(ev2, NULL);
             event_base_dispatch(msg->base);
@@ -356,7 +414,8 @@ class Server{
                 msg.base = mainEvent->getBase();
                 msg.src_fd = accept_fd;
                 msg.stage = 0;
-                struct event * ev = event_new(mainEvent->getBase(), accept_fd, EV_READ, handleMainConn, (void *)&msg);
+                struct event * ev = event_new(msg.base, accept_fd, EV_READ, handleMainConn, (void *)&msg);
+                msg.ev_m = ev;
                 event_add(ev, NULL);
                 event_base_dispatch(mainEvent->getBase());
                 //应该在主线程中注册一个signal事件，用于结束主线程的左右事件
