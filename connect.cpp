@@ -24,10 +24,16 @@ int main(){
     inet_aton("127.0.0.1", &ad.sin_addr);
     printf("%x\n", ad.sin_addr.s_addr);
     event_base * base = event_base_new();
-    int conn_res = connect(socket_fd, (sockaddr *)&ad, sizeof(ad));
-    write_cb(socket_fd, 1, NULL);
+    int conn_res;
+    while(true){
+        if((conn_res = connect(socket_fd, (sockaddr *)&ad, sizeof(ad)) == 0)){
+            event *ev = event_new(base, socket_fd, EV_READ|EV_WRITE, write_cb, NULL);
+            event_add(ev, NULL);
+            event_base_loop(base, 0);
+            break;
+        }
+    }
 
-    //event *ev = event_new(base, socket_fd, EV_WRITE, write_cb, NULL);
-    //event_add(ev, NULL);
-    //event_base_dispatch(base);
+    printf("%d\n", socket_fd);
+    printf("Program is running here!\n");
 }

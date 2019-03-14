@@ -1,4 +1,4 @@
-all:server client ss-server remote connect
+all:server client ss-server remote connect main
 server:server.cpp
 	g++ -std=c++17 server.cpp -o server
 client:client.cpp
@@ -9,4 +9,6 @@ remote:remote.cpp
 	g++ -std=c++17 -g remote.cpp -o remote -l event -l pthread
 connect:connect.cpp
 	g++ -std=c++17 -g connect.cpp -o connect -l event -l pthread
+main:main.cpp
+	g++ -std=c++17 -g main.cpp -o main -l event -l pthread
 

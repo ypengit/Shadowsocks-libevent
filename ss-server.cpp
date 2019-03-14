@@ -16,11 +16,17 @@
 #include <stdlib.h>
 #include <netdb.h>
 #include <limits>
+#include <fcntl.h>
 
 #include "ss-server.h"
 
 #define SOCKS_VERSION 0x05
 
+enum status{
+    ST_SUCCEES,
+    ST_PROTOCOL,
+    ST_VALIDLEN
+};
 
 struct message{
     struct sockaddr_in dst_addr;
@@ -35,15 +41,31 @@ struct message{
     struct event *ev1;
     struct event *ev2;
     struct event *ev_m;
+    struct event *ev_con;
     char * buff;
+    struct timeval tv;
+    struct timeval timeout;
+    status error;
     message(){
         //应当从内存池中申请一块区域
         valid = 0;
         buff = new char[1460];
         bzero(buff, 1460);
+        evutil_timerclear(&timeout);
+        timeout.tv_sec = 2;
     }
     ~message(){
         delete [] buff;
+    }
+    void update_time(){
+        evutil_gettimeofday(&tv, NULL);
+    }
+    bool isExpired(){
+        struct timeval now, res;
+        evutil_timerclear(&res);
+        evutil_gettimeofday(&now, NULL);
+        evutil_timersub(&now, &tv, &res);
+        return evutil_timercmp(&res, &timeout, >);
     }
 };
 
@@ -155,6 +177,7 @@ void close_fd(int fd, struct message *msg){
 void handleReadFromClient(int fd, short event, void * arg){
     struct message *msg = (struct message *)arg;
 
+
     if(event & EV_READ){
         //以太网最大MTU为1500,IP头部20字节，TCP头部20字节
         msg->valid = recv(fd, msg->buff, 1460, 0);
@@ -220,9 +243,66 @@ void handleReadFromServer(int fd, short event, void * arg){
 
 
 
-void close_m_fd(int fd, struct message *msg){
-    event_del(msg->ev_m);
-    close(fd);
+void handleConnToServer(int fd, short event, void * arg){
+    struct message * msg = (struct message *)arg;
+    //如果成功，则向客户端发送成功连接报文
+
+
+    printf("Program is running here!\n");
+    msg->stage = 3;
+
+    while(true){
+        if(msg->stage == 3){
+            if(msg->isExpired()){
+                printf("超时\n");
+                //触发了fd，但这时已经超时了
+                //超时
+                msg->stage = 5;
+                continue;
+            }
+            else{
+                printf("没有超时\n");
+                bzero(msg->buff, 10);
+                msg->buff[0] = '\x05';
+                msg->buff[3] = '\x01';
+
+                //返回地址为0.0.0.0和端口0，因为它只是通知信息，要满足报文结构
+                msg->valid = send(msg->src_fd, msg->buff, 10, 0);
+                //event_base_loop(msg->base, EVLOOP_NONBLOCK);
+                if(msg->valid != 10){
+                    msg->error = ST_VALIDLEN;
+                    msg->stage = 5;
+                    continue;
+                }
+                //说明此时已经连接到远端服务器了，两边的连接已经通畅，此时应该注册2个事件
+                //每个时间应该能够知道它能否被读，已经它是否被关闭，事件应该是常备事件
+                //ev1 负责从客户端读取数据发送到远端服务器
+                //ev2 负责从远端服务器读取数据发送到客户端
+                struct event * ev1 = event_new(msg->base, msg->src_fd, EV_READ|EV_PERSIST|EV_CLOSED,  handleReadFromClient, (void *)msg);
+                struct event * ev2 = event_new(msg->base, msg->dst_fd, EV_READ|EV_PERSIST|EV_CLOSED,  handleReadFromServer, (void *)msg);
+
+                //将两事件注册到msg上，在错误或关闭时，可以消去事件
+                msg->ev1 = ev1;
+                msg->ev2 = ev2;
+
+                event_add(ev1, NULL);
+                event_add(ev2, NULL);
+
+                //这里很重要，不能使用event_base_dispatch，因为要及时返回，否则事件集很可能阻塞在这里，直到ev1,ev2各调用一次
+                event_base_loop(msg->base, EVLOOP_NONBLOCK);
+                msg->stage = 0;
+                break;
+                //此处是正常状态，正常的跳出整个连接即可
+            }
+        }
+        else if(msg->stage == 5){
+            //建立起来了与远端服务器的连接，目的是析构客户端和远端服务器的连接,删除主事件,而生成了子事件的可以自己删除自己
+            event_del(msg->ev_m);
+            close(msg->src_fd);
+            close(msg->dst_fd);
+            break;
+        }
+    }
 }
 
 void handleMainConn(int fd, short event, void * arg){
@@ -246,10 +326,12 @@ void handleMainConn(int fd, short event, void * arg){
 
             if((header.ver != SOCKS_VERSION) || (msg->valid != 2)){
                 //协议错误,根据sock5协议标准，此情况下无需回答
-                close_m_fd(msg->src_fd, msg);
-                break;
+                msg->error = ST_PROTOCOL;
+                msg->stage = 4;
+                continue;
             }
 
+            printf("len is %d\n", header.method);
             //选择加密方式
             if(header.method == 0){
                 //默认不加密
@@ -261,21 +343,25 @@ void handleMainConn(int fd, short event, void * arg){
                 char * methods = new char[header.method];
                 msg->valid = recv(msg->src_fd, methods, header.method, 0);
                 if(msg->valid != header.method){
-                    close_m_fd(msg->src_fd, msg);
-                    break;
+                    msg->error = ST_VALIDLEN;
+                    msg->stage = 4;
+                    continue;
                 }
                 msg->select_method = methods[msg->select_method];
                 delete [] methods;
             }
 
             //将选择出来的加密方式传给客户端
-            header.method = msg->select_method;
+            //[TODO]为了简便，直接用0，后面修改
+            //header.method = msg->select_method;
+            header.method = '\x00';
 
             msg->valid = send(msg->src_fd, (char *)&header, 2, 0);
 
             if(msg->valid != 2){
-                close_m_fd(msg->src_fd, msg);
-                break;
+                msg->error = ST_VALIDLEN;
+                msg->stage = 4;
+                continue;
             }
             msg->stage = 1;
         }
@@ -285,8 +371,9 @@ void handleMainConn(int fd, short event, void * arg){
             //从客户端接收信息
             msg->valid = recv(msg->src_fd, (char *)&recv_req, 4, 0);
             if(msg->valid != 4){
-                close_m_fd(msg->src_fd, msg);
-                break;
+                msg->error = ST_VALIDLEN;
+                msg->stage = 4;
+                continue;
             }
             msg->atyp = recv_req.atyp;
 
@@ -304,13 +391,16 @@ void handleMainConn(int fd, short event, void * arg){
                 case 0x04:
                     break;
             }
+            printf("address len is %d\n", address_len);
             char * address = new char[address_len];
+
 
             msg->valid = recv(msg->src_fd, address, address_len, 0);
 
             if(msg->valid != address_len){
-                close_m_fd(msg->src_fd, msg);
-                break;
+                msg->error = ST_VALIDLEN;
+                msg->stage = 4;
+                continue;
             }
 
 
@@ -318,21 +408,35 @@ void handleMainConn(int fd, short event, void * arg){
             msg->valid = recv(msg->src_fd, (char *)&port, 2, 0);
 
             if(msg->valid != 2){
-                close_m_fd(msg->src_fd, msg);
-                break;
+                msg->error = ST_VALIDLEN;
+                msg->stage = 4;
+                continue;
             }
+
+            msg->dst_addr.sin_family = AF_INET;
+            msg->dst_addr.sin_port   = port;
+
 
             //域名查找较为复杂，稍后完成[TODO]
             if(recv_req.atyp == 0x03){
                 //使用域名查询
                 struct hostent * h;
+                char * tmpaddr = new char[address_len+1];
+                memcpy(tmpaddr, address, address_len);
+                tmpaddr[address_len-1] = '\0';
+
                 h = gethostbyname(address);
-                if(!h){
+                printf("Address:");
+                for(int j = 0; j < address_len; ++j){
+                    printf("%c", address[j]);
+                }
+                printf("\n");
+                if(h){
                     int i = 0;
                     while(h->h_addr_list[i] != NULL){
                         //已经是网络字节序
                         //msg->dst_addr.sin_addr.s_addr = h->h_addr_list[i];
-                        ++i;
+                        msg->dst_addr.sin_addr.s_addr = *((uint32_t *)h->h_addr_list[i]);
                         break;
                     }
                 }
@@ -344,14 +448,16 @@ void handleMainConn(int fd, short event, void * arg){
             else if(recv_req.atyp == 0x01){
                 //传递过来的数据都是网络字节序，可以直接转义使用,其他无论是
                 //IPV4还是IPV6都可以直接设置传输
-                msg->dst_addr.sin_family = AF_INET;
-                msg->dst_addr.sin_port   = port;
                 msg->dst_addr.sin_addr.s_addr = *((uint32_t *)address);
             }
             else{
                 //IPV6稍后完成[TODO]
 
             }
+
+
+            printf("address:%s\n", inet_ntoa(msg->dst_addr.sin_addr));
+
             //如果没有在这里返回，则认为代理服务器已经获得远端服务器的ip与端口
             msg->stage = 2;
         }
@@ -359,51 +465,100 @@ void handleMainConn(int fd, short event, void * arg){
             //连接到远端服务器
             msg->dst_fd = socket(AF_INET, SOCK_STREAM, 0);
 
-            if(0 == connect(msg->dst_fd, (struct sockaddr *)&(msg->dst_addr), sizeof(msg->dst_addr))){
-                //如果成功，则向客户端发送成功连接报文
-                struct connect_request resp_req;
-                resp_req.ver = '\x05';
-                resp_req.rep = '\x00';
-                resp_req.rsv = '\x00';
-                resp_req.atyp = msg->atyp;
 
-                msg->valid = send(msg->src_fd, (char *)&resp_req, 4, 0);
+            //int flag,old_flag;
+            //flag = fcntl(msg->dst_fd, F_GETFL, 0);
+            //flag |= O_NONBLOCK;
+            //flag = fcntl(msg->dst_fd, F_SETFL, flag); //将连接套接字设置为非阻塞。
 
-                if(msg->valid != 4){
-                    close_m_fd(msg->src_fd, msg);
+
+            int count = 0, conn_fd;
+            while(true){
+                if(count < 10 || ((conn_fd =  connect(msg->dst_fd, (struct sockaddr *)&(msg->dst_addr), sizeof(msg->dst_addr))) == 0)){
+                    printf("address连接成功:%s\n", inet_ntoa(msg->dst_addr.sin_addr));
+
+                    msg->ev_con = event_new(msg->base, msg->dst_fd, EV_READ|EV_WRITE, handleConnToServer, (void*)msg);
+
+                    //event可用时，返回继续执行，否则阻塞在这里
+                    msg->update_time();
+                    event_add(msg->ev_con, NULL);
+                    //这里不能设置为非阻塞的，因为这里继续运行则逻辑错误，应该就让它在这里就好,设置一个超时事件
+                    //如果超时事件内还没有触发，则说明connect操作超时，应该返回，关闭
+                    //event_base_loop(msg->base, EVLOOP_NONBLOCK);
+                    event_base_dispatch(msg->base);
+                    //msg->stage = 0;
                     break;
                 }
+                else if(count >= 10){
+                    //与客户端连接成功，但与远端服务器连接不成功,仅需要关闭客户端的链接，远端服务器的还未建立起来
+                    //此时不能简单关闭，因为还在连接建立阶段，故要根据情况返回状态码
+                    //[TODO]
+                    printf("address连接失败:%s\n", inet_ntoa(msg->dst_addr.sin_addr));
+                    bzero(msg->buff, 10);
+                    msg->buff[0] = '\x05';
+                    msg->buff[1] = '\x03';
+                    msg->buff[3] = '\x01';
 
-                msg->stage = 3;
-            }
-            else{
-                //与客户端连接成功，但与远端服务器连接不成功,仅需要关闭客户端的链接，远端服务器的还未建立起来
-                //此时不能简单关闭，因为还在连接建立阶段，故要根据情况返回状态码
-                //[TODO]
-                break;
+                    msg->valid = send(msg->src_fd, msg->buff, 10, 0);
+
+                    if(msg->valid != 10){
+                        msg->error = ST_VALIDLEN;
+                        msg->stage = 5;
+                        continue;
+                    }
+
+                    event_del(msg->ev_m);
+                    break;
+                }
+                count ++;
             }
         }
-        else if(msg->stage == 3){
+        else if(msg->stage == 4){
+            //没有成功建立起与远端服务器的连接,应该删除主事件，并关闭src_fd
+            //远端服务器不可达
+            bzero(msg->buff, 10);
+            msg->buff[0] = '\x05';
+            msg->buff[1] = '\x04';
+            msg->buff[3] = '\x01';
 
-            //说明此时已经连接到远端服务器了，两边的连接已经通畅，此时应该注册2个事件
-            //每个时间应该能够知道它能否被读，已经它是否被关闭，事件应该是常备事件
-            //ev1 负责从客户端读取数据发送到远端服务器
-            //ev2 负责从远端服务器读取数据发送到客户端
-            struct event * ev1 = event_new(msg->base, msg->src_fd, EV_READ|EV_PERSIST|EV_CLOSED,  handleReadFromClient, (void *)msg);
-            struct event * ev2 = event_new(msg->base, msg->dst_fd, EV_READ|EV_PERSIST|EV_CLOSED,  handleReadFromServer, (void *)msg);
+            //协议错误
+            if(msg->error == ST_PROTOCOL){
+                msg->buff[1] = '\x02';
+            }
 
-            //将两事件注册到msg上，在错误或关闭时，可以消去事件
-            msg->ev1 = ev1;
-            msg->ev2 = ev2;
+            msg->valid = send(msg->src_fd, msg->buff, 10, 0);
 
-            event_add(ev1, NULL);
-            event_add(ev2, NULL);
+            if(msg->valid != 10){
+                msg->error = ST_VALIDLEN;
+                msg->stage = 5;
+                continue;
+            }
 
-            //这里很重要，不能使用event_base_dispatch，因为要及时返回，否则事件集很可能阻塞在这里，直到ev1,ev2各调用一次
-            event_base_loop(msg->base, EVLOOP_NONBLOCK);
-            msg->stage = 4;
+            close(msg->src_fd);
+            event_del(msg->ev_m);
             break;
-            //第四个状态即为已经分配完全，不用再干预,它的撤销停止都放在子线程中执行
+        }
+        else if(msg->stage == 5){
+            //建立起来了与远端服务器的连接，目的是析构客户端和远端服务器的连接,删除主事件,而生成了子事件的可以自己删除自己
+            //正常结束
+
+            bzero(msg->buff, 10);
+            msg->buff[0] = '\x05';
+            msg->buff[1] = '\x01';
+            msg->buff[3] = '\x01';
+
+            msg->valid = send(msg->src_fd, msg->buff, 10, 0);
+
+            if(msg->valid != 10){
+                msg->error = ST_VALIDLEN;
+                msg->stage = 5;
+                continue;
+            }
+
+            event_del(msg->ev_m);
+            close(msg->src_fd);
+            close(msg->dst_fd);
+            break;
         }
     }
 }
@@ -463,7 +618,7 @@ class Server{
             bzero(&serverAddr, sizeof(serverAddr));
 
             serverAddr.sin_family = AF_INET;
-            serverAddr.sin_port = htons(7000);
+            serverAddr.sin_port = htons(1080);
             serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
 
             if(bind(socket_fd, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) == -1){
@@ -507,7 +662,7 @@ int main(int argc, char ** argv){
     char * configPath = NULL;
     const char * str = "c|s|p|l|k|m|t|h";
     server_ip = "127.0.0.1";
-    server_port = 9999;
+    server_port = 1080;
     password = "123456";
     method = "chacha20";
     std::unordered_map<std::string, char> methods;

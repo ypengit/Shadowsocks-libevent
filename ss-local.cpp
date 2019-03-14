@@ -4,12 +4,14 @@
 
 
 struct msg{
-
+    struct sockaddr_in * src_addr;
+    struct sockaddr_in * dst_addr;
 };
 
 
 void handleConn(int fd, short event, void * arg){
-
+    struct message * msg = (struct message *)arg;
+    msg->
 }
 
 

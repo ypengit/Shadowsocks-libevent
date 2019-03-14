@@ -43,7 +43,7 @@ int main(int argc, char ** argv){
 
     bind(socket_fd, (struct sockaddr*)&ad, sizeof(ad));
     socklen_t len = sizeof(client);
-    int accept_fd = accept(socket_fd, (struct sockaddr*)&client, &len);
+    int connect_fd = connect(socket_fd, (struct sockaddr*)&client, len);
 
 
 
@@ -52,7 +52,7 @@ int main(int argc, char ** argv){
     tv.tv_sec = 3;
 
 
-    signal_init = event_new(base, accept_fd, EV_READ, signal_cb, event_self_cbarg());
+    signal_init = event_new(base, socket, EV_READ, signal_cb, event_self_cbarg());
     event_add(signal_init, &tv);
 
     event_base_loop(base, EVLOOP_ONCE);

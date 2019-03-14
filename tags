@@ -13,7 +13,7 @@ EventThreadPool	ss-server.cpp	/^class EventThreadPool{$/;"	c	file:
 PORT	client.cpp	11;"	d	file:
 PORT	server.cpp	14;"	d	file:
 SERVER_ADDRESS	server.cpp	13;"	d	file:
-SOCKS_VERSION	ss-server.cpp	21;"	d	file:
+SOCKS_VERSION	ss-server.cpp	23;"	d	file:
 Server	ss-server.cpp	/^        Server(std::string server_ip, int server_port, std::string password, std::string method, int threadNum):$/;"	f	class:Server
 Server	ss-server.cpp	/^class Server{$/;"	c	file:
 TRANSMIT_TYPE	client.cpp	12;"	d	file:
@@ -22,6 +22,7 @@ a	client_test.py	/^a = s.recv(2)$/;"	v
 a	client_test.py	/^a = s.recv(4)$/;"	v
 atyp	ss-server.cpp	/^    char atyp;$/;"	m	struct:message	file:
 atyp	ss-server.h	/^    char atyp;$/;"	m	struct:connect_request
+atyp	ss-server.h	/^    char atyp;$/;"	m	struct:connect_response
 base	ss-server.cpp	/^    struct event_base * base;$/;"	m	struct:message	typeref:struct:message::event_base	file:
 base	ss-server.cpp	/^    struct event_base * base;$/;"	m	struct:source_addr_base	typeref:struct:source_addr_base::event_base	file:
 base	ss-server.cpp	/^    struct event_base *base;$/;"	m	class:Event	typeref:struct:Event::event_base	file:
@@ -30,24 +31,32 @@ buff	ss-server.cpp	/^    char * buff;$/;"	m	struct:message	file:
 called	main.cpp	/^int called = 0;$/;"	v
 close_fd	ss-server.cpp	/^void close_fd(int fd, struct message *msg){$/;"	f
 close_m_fd	ss-server.cpp	/^void close_m_fd(int fd, struct message *msg){$/;"	f
-communicateMethod	ss-server.cpp	/^        int communicateMethod;$/;"	m	class:Server	file:
 connect_request	ss-server.h	/^struct connect_request{$/;"	s
+connect_response	ss-server.h	/^struct connect_response{$/;"	s
+dst_addr	ss-local.cpp	/^    struct sockaddr_in * dst_addr;$/;"	m	struct:msg	typeref:struct:msg::sockaddr_in	file:
 dst_addr	ss-server.cpp	/^    struct sockaddr_in dst_addr;$/;"	m	struct:message	typeref:struct:message::sockaddr_in	file:
 dst_fd	ss-server.cpp	/^    int dst_fd;$/;"	m	struct:message	file:
 ev	ss-server.cpp	/^        Event ev;$/;"	m	class:EventThread	file:
 ev1	ss-server.cpp	/^    struct event *ev1;$/;"	m	struct:message	typeref:struct:message::event	file:
 ev2	ss-server.cpp	/^    struct event *ev2;$/;"	m	struct:message	typeref:struct:message::event	file:
+ev_con	ss-server.cpp	/^    struct event *ev_con;$/;"	m	struct:message	typeref:struct:message::event	file:
 ev_m	ss-server.cpp	/^    struct event *ev_m;$/;"	m	struct:message	typeref:struct:message::event	file:
 eventThreadPool	ss-server.cpp	/^        EventThreadPool eventThreadPool;$/;"	m	class:Server	file:
 events	ss-server.cpp	/^        std::vector<struct event_base *> events;$/;"	m	class:Server	file:
+evutil_timercmp	ss-server.h	24;"	d
+func	main.cpp	/^void func(){$/;"	f
 func	ss-server.cpp	/^void * func(void * args){$/;"	f
 getBase	ss-server.cpp	/^    struct event_base * getBase(){$/;"	f	class:Event
 get_base	ss-server.cpp	/^        struct event_base* get_base(){$/;"	f	class:EventThread
 get_bases	ss-server.cpp	/^    std::vector<struct event_base*> get_bases(){$/;"	f	class:EventThreadPool
 get_low_load_base	ss-server.cpp	/^        struct event_base * get_low_load_base(){$/;"	f	class:Server
+handleConn	ss-local.cpp	/^void handleConn(int fd, short event, void * arg){$/;"	f
+handleConnToServer	ss-server.cpp	/^void handleConnToServer(int fd, short event, void * arg){$/;"	f
 handleMainConn	ss-server.cpp	/^void handleMainConn(int fd, short event, void * arg){$/;"	f
 handleReadFromClient	ss-server.cpp	/^void handleReadFromClient(int fd, short event, void * arg){$/;"	f
 handleReadFromServer	ss-server.cpp	/^void handleReadFromServer(int fd, short event, void * arg){$/;"	f
+ip	ss-server.h	/^    uint32_t ip;$/;"	m	struct:connect_response
+isExpired	ss-server.cpp	/^    bool isExpired(){$/;"	f	struct:message
 listenPort	ss-server.cpp	/^        int listenPort(struct sockaddr_in &source_addr){$/;"	f	class:Server
 loopFunc	ss-server.cpp	/^void *loopFunc(void * arg){$/;"	f
 main	client.cpp	/^int main(int argc, char ** argv){$/;"	f
@@ -55,34 +64,45 @@ main	connect.cpp	/^int main(){$/;"	f
 main	main.cpp	/^int main(int argc, char ** argv){$/;"	f
 main	remote.cpp	/^int main(){$/;"	f
 main	server.cpp	/^int main(int argc, char ** argv){$/;"	f
+main	ss-local.cpp	/^int main(int argc, char ** argv){$/;"	f
 main	ss-server.cpp	/^int main(int argc, char ** argv){$/;"	f
 message	ss-server.cpp	/^    message(){$/;"	f	struct:message
 message	ss-server.cpp	/^struct message{$/;"	s	file:
 method	ss-server.cpp	/^        std::string method;$/;"	m	class:Server	file:
 method	ss-server.h	/^    char method;$/;"	m	struct:ver_method_select
+msg	ss-local.cpp	/^struct msg{$/;"	s	file:
 password	ss-server.cpp	/^        std::string password;$/;"	m	class:Server	file:
-quit	ss-server.cpp	/^        bool quit;$/;"	m	class:Server	file:
+port	ss-server.h	/^    unsigned short port;$/;"	m	struct:connect_response
 quiting	ss-server.cpp	/^    bool quiting = false;$/;"	m	class:Event	file:
 read_cb	remote.cpp	/^void read_cb(int fd, short event, void * arg){$/;"	f
 rep	ss-server.cpp	/^    char rep;$/;"	m	struct:message	file:
 rep	ss-server.h	/^    char rep;$/;"	m	struct:connect_request
+rep	ss-server.h	/^    char rep;$/;"	m	struct:connect_response
+res	sock5_test.py	/^res = accept_fd.recv(2048)$/;"	v
+res	ss-server.cpp	/^    std::vector<struct event_base*> res;$/;"	m	class:EventThreadPool	file:
 rsv	ss-server.h	/^    char rsv;$/;"	m	struct:connect_request
+rsv	ss-server.h	/^    char rsv;$/;"	m	struct:connect_response
 s	client_test.py	/^s = socket.socket()$/;"	v
+s	sock5_test.py	/^s = socket.socket()$/;"	v
 select_method	ss-server.cpp	/^    char select_method;$/;"	m	struct:message	file:
 server_ip	ss-server.cpp	/^        std::string server_ip;$/;"	m	class:Server	file:
 server_port	ss-server.cpp	/^        int server_port;$/;"	m	class:Server	file:
 signal_cb	main.cpp	/^void signal_cb(evutil_socket_t fd, short event, void * arg){$/;"	f
-socket_fd	ss-server.cpp	/^        int socket_fd;$/;"	m	class:Server	file:
 source_addr	ss-server.cpp	/^    struct sockaddr_in * source_addr;$/;"	m	struct:source_addr_base	typeref:struct:source_addr_base::sockaddr_in	file:
 source_addr_base	ss-server.cpp	/^struct source_addr_base{$/;"	s	file:
+src_addr	ss-local.cpp	/^    struct sockaddr_in * src_addr;$/;"	m	struct:msg	typeref:struct:msg::sockaddr_in	file:
 src_fd	ss-server.cpp	/^    int src_fd;$/;"	m	struct:message	file:
 stage	ss-server.cpp	/^    char stage;$/;"	m	struct:message	file:
 start	ss-server.cpp	/^        void start(){$/;"	f	class:Server
 t	ss-server.cpp	/^        pthread_t t;$/;"	m	class:EventThread	file:
 threadNum	ss-server.cpp	/^        int threadNum;$/;"	m	class:Server	file:
+timeout	ss-server.cpp	/^    struct timeval timeout;$/;"	m	struct:message	typeref:struct:message::timeval	file:
+tv	ss-server.cpp	/^    struct timeval tv;$/;"	m	struct:message	typeref:struct:message::timeval	file:
+update_time	ss-server.cpp	/^    void update_time(){$/;"	f	struct:message
 valid	ss-server.cpp	/^    short valid;$/;"	m	struct:message	file:
 vec	ss-server.cpp	/^    std::vector<EventThread*> vec;$/;"	m	class:EventThreadPool	file:
 ver	ss-server.h	/^    char ver;$/;"	m	struct:connect_request
+ver	ss-server.h	/^    char ver;$/;"	m	struct:connect_response
 ver	ss-server.h	/^    char ver;$/;"	m	struct:ver_method_select
 ver_method_select	ss-server.h	/^struct ver_method_select{$/;"	s
 write_cb	connect.cpp	/^void write_cb(int fd, short event, void * arg){$/;"	f

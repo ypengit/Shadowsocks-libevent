@@ -11,3 +11,13 @@ struct connect_request{
     char rsv;
     char atyp;
 };
+struct connect_response{
+    char ver;
+    char rep;
+    char rsv;
+    char atyp;
+    uint32_t ip;
+    unsigned short port;
+};
+
+
