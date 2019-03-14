@@ -168,8 +168,6 @@ class EventThreadPool{
 //不以其他情况为转移，只要两端的连接还在，那么就不应该断开这个连接
 
 void close_fd(int fd, struct message *msg){
-    event_del(msg->ev1);
-    event_del(msg->ev2);
     close(fd);
 }
 
@@ -203,6 +201,7 @@ void handleReadFromClient(int fd, short event, void * arg){
     else if(event & EV_CLOSED){
         //如果此时检测到关闭，仍旧是消去事件，并关闭另一个fd
         close_fd(msg->dst_fd, msg);
+        close_fd(msg->src_fd, msg);
         return;
     }
 }
@@ -233,8 +232,6 @@ void handleReadFromServer(int fd, short event, void * arg){
         }
         else if(event & EV_CLOSED){
             //如果此时检测到关闭，仍旧是消去事件，并关闭另一个fd
-            event_del(msg->ev1);
-            event_del(msg->ev2);
             close_fd(msg->dst_fd, msg);
             return;
         }
@@ -290,14 +287,13 @@ void handleConnToServer(int fd, short event, void * arg){
 
                 //这里很重要，不能使用event_base_dispatch，因为要及时返回，否则事件集很可能阻塞在这里，直到ev1,ev2各调用一次
                 event_base_loop(msg->base, EVLOOP_NONBLOCK);
-                msg->stage = 0;
+                msg->stage = 6;
                 break;
                 //此处是正常状态，正常的跳出整个连接即可
             }
         }
         else if(msg->stage == 5){
             //建立起来了与远端服务器的连接，目的是析构客户端和远端服务器的连接,删除主事件,而生成了子事件的可以自己删除自己
-            event_del(msg->ev_m);
             close(msg->src_fd);
             close(msg->dst_fd);
             break;
@@ -313,6 +309,7 @@ void handleMainConn(int fd, short event, void * arg){
      * 3. stage = 2 表示沟通完成，双方可以发送数据了
      * 4. stage = 3 表示事件被注册到基本事件集中
     */
+
     struct message * msg = (struct message *)arg;
 
     while(true){
@@ -472,45 +469,39 @@ void handleMainConn(int fd, short event, void * arg){
             //flag = fcntl(msg->dst_fd, F_SETFL, flag); //将连接套接字设置为非阻塞。
 
 
-            int count = 0, conn_fd;
-            while(true){
-                if(count < 10 || ((conn_fd =  connect(msg->dst_fd, (struct sockaddr *)&(msg->dst_addr), sizeof(msg->dst_addr))) == 0)){
-                    printf("address连接成功:%s\n", inet_ntoa(msg->dst_addr.sin_addr));
+            int conn_fd;
+            if((conn_fd =  connect(msg->dst_fd, (struct sockaddr *)&(msg->dst_addr), sizeof(msg->dst_addr))) == 0){
+                printf("address连接成功:%s\n", inet_ntoa(msg->dst_addr.sin_addr));
 
-                    msg->ev_con = event_new(msg->base, msg->dst_fd, EV_READ|EV_WRITE, handleConnToServer, (void*)msg);
+                msg->ev_con = event_new(msg->base, msg->dst_fd, EV_READ|EV_WRITE, handleConnToServer, (void*)msg);
 
-                    //event可用时，返回继续执行，否则阻塞在这里
-                    msg->update_time();
-                    event_add(msg->ev_con, NULL);
-                    //这里不能设置为非阻塞的，因为这里继续运行则逻辑错误，应该就让它在这里就好,设置一个超时事件
-                    //如果超时事件内还没有触发，则说明connect操作超时，应该返回，关闭
-                    //event_base_loop(msg->base, EVLOOP_NONBLOCK);
-                    event_base_dispatch(msg->base);
-                    //msg->stage = 0;
-                    break;
+                //event可用时，返回继续执行，否则阻塞在这里
+                msg->update_time();
+                event_add(msg->ev_con, NULL);
+                //这里不能设置为非阻塞的，因为这里继续运行则逻辑错误，应该就让它在这里就好,设置一个超时事件
+                //如果超时事件内还没有触发，则说明connect操作超时，应该返回，关闭
+                //event_base_loop(msg->base, EVLOOP_NONBLOCK);
+                event_base_dispatch(msg->base);
+                //msg->stage = 0;
+                break;
+            }
+            else{
+                //与客户端连接成功，但与远端服务器连接不成功,仅需要关闭客户端的链接，远端服务器的还未建立起来
+                //此时不能简单关闭，因为还在连接建立阶段，故要根据情况返回状态码
+                //[TODO]
+                printf("address连接失败:%s\n", inet_ntoa(msg->dst_addr.sin_addr));
+                bzero(msg->buff, 10);
+                msg->buff[0] = '\x05';
+                msg->buff[1] = '\x03';
+                msg->buff[3] = '\x01';
+
+                msg->valid = send(msg->src_fd, msg->buff, 10, 0);
+
+                if(msg->valid != 10){
+                    msg->error = ST_VALIDLEN;
+                    msg->stage = 5;
+                    continue;
                 }
-                else if(count >= 10){
-                    //与客户端连接成功，但与远端服务器连接不成功,仅需要关闭客户端的链接，远端服务器的还未建立起来
-                    //此时不能简单关闭，因为还在连接建立阶段，故要根据情况返回状态码
-                    //[TODO]
-                    printf("address连接失败:%s\n", inet_ntoa(msg->dst_addr.sin_addr));
-                    bzero(msg->buff, 10);
-                    msg->buff[0] = '\x05';
-                    msg->buff[1] = '\x03';
-                    msg->buff[3] = '\x01';
-
-                    msg->valid = send(msg->src_fd, msg->buff, 10, 0);
-
-                    if(msg->valid != 10){
-                        msg->error = ST_VALIDLEN;
-                        msg->stage = 5;
-                        continue;
-                    }
-
-                    event_del(msg->ev_m);
-                    break;
-                }
-                count ++;
             }
         }
         else if(msg->stage == 4){
@@ -535,7 +526,6 @@ void handleMainConn(int fd, short event, void * arg){
             }
 
             close(msg->src_fd);
-            event_del(msg->ev_m);
             break;
         }
         else if(msg->stage == 5){
@@ -555,7 +545,6 @@ void handleMainConn(int fd, short event, void * arg){
                 continue;
             }
 
-            event_del(msg->ev_m);
             close(msg->src_fd);
             close(msg->dst_fd);
             break;
