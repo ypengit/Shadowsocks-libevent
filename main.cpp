@@ -42,8 +42,6 @@ int main(int argc, char ** argv){
     base = event_base_new();
     int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
 
-    int flag,old_flag;
-
     struct sockaddr_in ad, client;
     ad.sin_port = htons(3000);
     ad.sin_family = AF_INET;
@@ -54,25 +52,20 @@ int main(int argc, char ** argv){
     socklen_t len = sizeof(client);
 
 
-    //int accept_fd = accept(socket_fd, (struct sockaddr*)&client, &len);
-
-    //flag = fcntl(accept_fd, F_GETFL, 0);
-    //flag |= O_NONBLOCK;
-    //flag = fcntl(accept_fd, F_SETFL, flag); //将连接套接字设置为非阻塞。
-
-    //printf("accept_fd is %d\n", accept_fd);
-
 
     struct timeval tv;
     evutil_timerclear(&tv);
-    tv.tv_sec = 3;
+    tv.tv_sec = 1;
 
 
     signal_init = event_new(base, 0, EV_READ|EV_TIMEOUT, signal_cb, event_self_cbarg());
 
     event_add(signal_init, &tv);
 
-    event_base_loop(base, EVLOOP_NONBLOCK);
+    while(true){
+        event_base_loop(base, EVLOOP_NONBLOCK);
+    }
+    //event_base_loop(base, EVLOOP_ONCE);
     //event_base_loop(base, 0);
     //event_base_dispatch(base);
 
