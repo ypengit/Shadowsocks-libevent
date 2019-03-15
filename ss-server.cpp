@@ -52,7 +52,7 @@ struct message{
         buff = new char[1460];
         bzero(buff, 1460);
         evutil_timerclear(&timeout);
-        timeout.tv_sec = 2;
+        timeout.tv_sec = 1;
     }
     ~message(){
         delete [] buff;
@@ -61,6 +61,7 @@ struct message{
         evutil_gettimeofday(&tv, NULL);
     }
     bool isExpired(){
+        return false;
         struct timeval now, res;
         evutil_timerclear(&res);
         evutil_gettimeofday(&now, NULL);
@@ -168,7 +169,7 @@ class EventThreadPool{
 //不以其他情况为转移，只要两端的连接还在，那么就不应该断开这个连接
 
 void close_fd(int fd, struct message *msg){
-    close(fd);
+    shutdown(fd, SHUT_RDWR);
 }
 
 
@@ -241,11 +242,28 @@ void handleReadFromServer(int fd, short event, void * arg){
 
 
 void handleConnToServer(int fd, short event, void * arg){
+
+
     struct message * msg = (struct message *)arg;
+            printf("Program is running here!\n");
+
+    if(event & EV_TIMEOUT){
+        printf("与目标主机建立连接超时!\n");
+        close_fd(msg->src_fd, msg);
+        return;
+    }
+
+    if(event & EV_CLOSED){
+        printf("与目标主机建立连接超时!\n");
+        close_fd(msg->src_fd, msg);
+        return;
+    }
+
+
     //如果成功，则向客户端发送成功连接报文
+    printf("address连接成功:%s\n", inet_ntoa(msg->dst_addr.sin_addr));
 
 
-    printf("Program is running here!\n");
     msg->stage = 3;
 
     while(true){
@@ -275,8 +293,8 @@ void handleConnToServer(int fd, short event, void * arg){
                 //每个时间应该能够知道它能否被读，已经它是否被关闭，事件应该是常备事件
                 //ev1 负责从客户端读取数据发送到远端服务器
                 //ev2 负责从远端服务器读取数据发送到客户端
-                struct event * ev1 = event_new(msg->base, msg->src_fd, EV_READ|EV_PERSIST|EV_CLOSED,  handleReadFromClient, (void *)msg);
-                struct event * ev2 = event_new(msg->base, msg->dst_fd, EV_READ|EV_PERSIST|EV_CLOSED,  handleReadFromServer, (void *)msg);
+                struct event * ev1 = event_new(msg->base, msg->src_fd, EV_READ|EV_CLOSED,  handleReadFromClient, (void *)msg);
+                struct event * ev2 = event_new(msg->base, msg->dst_fd, EV_READ|EV_CLOSED,  handleReadFromServer, (void *)msg);
 
                 //将两事件注册到msg上，在错误或关闭时，可以消去事件
                 msg->ev1 = ev1;
@@ -294,11 +312,22 @@ void handleConnToServer(int fd, short event, void * arg){
         }
         else if(msg->stage == 5){
             //建立起来了与远端服务器的连接，目的是析构客户端和远端服务器的连接,删除主事件,而生成了子事件的可以自己删除自己
-            close(msg->src_fd);
-            close(msg->dst_fd);
+            shutdown(msg->src_fd, SHUT_RDWR);
+            shutdown(msg->dst_fd, SHUT_RDWR);
             break;
         }
     }
+}
+
+int setnoblocking(int fd){
+    int flag,old_flag;
+
+    //这个msg->dst完全可以设定为非阻塞的,因为它已经给分配了fd
+    flag = fcntl(fd, F_GETFL, 0);
+    flag |= O_NONBLOCK;
+    flag = fcntl(fd, F_SETFL, flag); //将连接套接字设置为非阻塞。
+
+    return flag;
 }
 
 void handleMainConn(int fd, short event, void * arg){
@@ -462,26 +491,19 @@ void handleMainConn(int fd, short event, void * arg){
             //连接到远端服务器
             msg->dst_fd = socket(AF_INET, SOCK_STREAM, 0);
 
-
-            //int flag,old_flag;
-            //flag = fcntl(msg->dst_fd, F_GETFL, 0);
-            //flag |= O_NONBLOCK;
-            //flag = fcntl(msg->dst_fd, F_SETFL, flag); //将连接套接字设置为非阻塞。
-
-
             int conn_fd;
             if((conn_fd =  connect(msg->dst_fd, (struct sockaddr *)&(msg->dst_addr), sizeof(msg->dst_addr))) == 0){
-                printf("address连接成功:%s\n", inet_ntoa(msg->dst_addr.sin_addr));
 
+                //当连接建立成功，即可运行
                 msg->ev_con = event_new(msg->base, msg->dst_fd, EV_READ|EV_WRITE, handleConnToServer, (void*)msg);
 
                 //event可用时，返回继续执行，否则阻塞在这里
                 msg->update_time();
-                event_add(msg->ev_con, NULL);
+                event_add(msg->ev_con, &msg->timeout);
                 //这里不能设置为非阻塞的，因为这里继续运行则逻辑错误，应该就让它在这里就好,设置一个超时事件
                 //如果超时事件内还没有触发，则说明connect操作超时，应该返回，关闭
-                //event_base_loop(msg->base, EVLOOP_NONBLOCK);
-                event_base_dispatch(msg->base);
+                event_base_loop(msg->base, EVLOOP_NONBLOCK);
+                //event_base_dispatch(msg->base);
                 //msg->stage = 0;
                 break;
             }
@@ -497,6 +519,8 @@ void handleMainConn(int fd, short event, void * arg){
 
                 msg->valid = send(msg->src_fd, msg->buff, 10, 0);
 
+                msg->stage = 5;
+                shutdown(msg->src_fd, SHUT_RDWR);
                 if(msg->valid != 10){
                     msg->error = ST_VALIDLEN;
                     msg->stage = 5;
@@ -525,7 +549,7 @@ void handleMainConn(int fd, short event, void * arg){
                 continue;
             }
 
-            close(msg->src_fd);
+            shutdown(msg->src_fd, SHUT_RDWR);
             break;
         }
         else if(msg->stage == 5){
@@ -545,8 +569,8 @@ void handleMainConn(int fd, short event, void * arg){
                 continue;
             }
 
-            close(msg->src_fd);
-            close(msg->dst_fd);
+            shutdown(msg->src_fd, SHUT_RDWR);
+            shutdown(msg->dst_fd, SHUT_RDWR);
             break;
         }
     }
