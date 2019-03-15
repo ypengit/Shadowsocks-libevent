@@ -1,6 +1,7 @@
 #include <getopt.h>
 #include <iostream>
 #include <vector>
+#include <sys/types.h>
 #include <event2/event.h>
 #include <pthread.h>
 #include <thread>
@@ -52,7 +53,7 @@ struct message{
         buff = new char[1460];
         bzero(buff, 1460);
         evutil_timerclear(&timeout);
-        timeout.tv_sec = 1;
+        timeout.tv_sec = 10;
     }
     ~message(){
         delete [] buff;
@@ -244,79 +245,6 @@ void handleReadFromServer(int fd, short event, void * arg){
 void handleConnToServer(int fd, short event, void * arg){
 
 
-    struct message * msg = (struct message *)arg;
-            printf("Program is running here!\n");
-
-    if(event & EV_TIMEOUT){
-        printf("与目标主机建立连接超时!\n");
-        close_fd(msg->src_fd, msg);
-        return;
-    }
-
-    if(event & EV_CLOSED){
-        printf("与目标主机建立连接超时!\n");
-        close_fd(msg->src_fd, msg);
-        return;
-    }
-
-
-    //如果成功，则向客户端发送成功连接报文
-    printf("address连接成功:%s\n", inet_ntoa(msg->dst_addr.sin_addr));
-
-
-    msg->stage = 3;
-
-    while(true){
-        if(msg->stage == 3){
-            if(msg->isExpired()){
-                printf("超时\n");
-                //触发了fd，但这时已经超时了
-                //超时
-                msg->stage = 5;
-                continue;
-            }
-            else{
-                printf("没有超时\n");
-                bzero(msg->buff, 10);
-                msg->buff[0] = '\x05';
-                msg->buff[3] = '\x01';
-
-                //返回地址为0.0.0.0和端口0，因为它只是通知信息，要满足报文结构
-                msg->valid = send(msg->src_fd, msg->buff, 10, 0);
-                //event_base_loop(msg->base, EVLOOP_NONBLOCK);
-                if(msg->valid != 10){
-                    msg->error = ST_VALIDLEN;
-                    msg->stage = 5;
-                    continue;
-                }
-                //说明此时已经连接到远端服务器了，两边的连接已经通畅，此时应该注册2个事件
-                //每个时间应该能够知道它能否被读，已经它是否被关闭，事件应该是常备事件
-                //ev1 负责从客户端读取数据发送到远端服务器
-                //ev2 负责从远端服务器读取数据发送到客户端
-                struct event * ev1 = event_new(msg->base, msg->src_fd, EV_READ|EV_CLOSED,  handleReadFromClient, (void *)msg);
-                struct event * ev2 = event_new(msg->base, msg->dst_fd, EV_READ|EV_CLOSED,  handleReadFromServer, (void *)msg);
-
-                //将两事件注册到msg上，在错误或关闭时，可以消去事件
-                msg->ev1 = ev1;
-                msg->ev2 = ev2;
-
-                event_add(ev1, NULL);
-                event_add(ev2, NULL);
-
-                //这里很重要，不能使用event_base_dispatch，因为要及时返回，否则事件集很可能阻塞在这里，直到ev1,ev2各调用一次
-                event_base_loop(msg->base, EVLOOP_NONBLOCK);
-                msg->stage = 6;
-                break;
-                //此处是正常状态，正常的跳出整个连接即可
-            }
-        }
-        else if(msg->stage == 5){
-            //建立起来了与远端服务器的连接，目的是析构客户端和远端服务器的连接,删除主事件,而生成了子事件的可以自己删除自己
-            shutdown(msg->src_fd, SHUT_RDWR);
-            shutdown(msg->dst_fd, SHUT_RDWR);
-            break;
-        }
-    }
 }
 
 int setnoblocking(int fd){
@@ -331,20 +259,11 @@ int setnoblocking(int fd){
 }
 
 void handleMainConn(int fd, short event, void * arg){
-    /*
-     * msg->stage状态：
-     * 1. stage = 0 表示为初始状态
-     * 2. stage = 1 表示沟通过使用的加密方式
-     * 3. stage = 2 表示沟通完成，双方可以发送数据了
-     * 4. stage = 3 表示事件被注册到基本事件集中
-    */
 
     struct message * msg = (struct message *)arg;
 
     while(true){
         if(msg->stage == 0){
-
-
             //*1*:接收版本号、加密方法数目和加密方法
             //*2*:从加密方法中，选择一项加密方法，并告知客户端
             struct ver_method_select header;
@@ -488,29 +407,52 @@ void handleMainConn(int fd, short event, void * arg){
             msg->stage = 2;
         }
         else if(msg->stage == 2){
+
             //连接到远端服务器
             msg->dst_fd = socket(AF_INET, SOCK_STREAM, 0);
 
-            int conn_fd;
-            if((conn_fd =  connect(msg->dst_fd, (struct sockaddr *)&(msg->dst_addr), sizeof(msg->dst_addr))) == 0){
+            setnoblocking(msg->dst_fd);
 
-                //当连接建立成功，即可运行
-                msg->ev_con = event_new(msg->base, msg->dst_fd, EV_READ|EV_WRITE, handleConnToServer, (void*)msg);
+            int conn_res = connect(msg->dst_fd, (struct sockaddr *)&(msg->dst_addr), sizeof(msg->dst_addr));
 
-                //event可用时，返回继续执行，否则阻塞在这里
-                msg->update_time();
-                event_add(msg->ev_con, &msg->timeout);
-                //这里不能设置为非阻塞的，因为这里继续运行则逻辑错误，应该就让它在这里就好,设置一个超时事件
-                //如果超时事件内还没有触发，则说明connect操作超时，应该返回，关闭
-                event_base_loop(msg->base, EVLOOP_NONBLOCK);
-                //event_base_dispatch(msg->base);
-                //msg->stage = 0;
-                break;
+
+            fd_set set;
+            FD_ZERO(&set);
+            FD_SET(msg->dst_fd, &set);
+
+            if(conn_res == -1){
+                if(select(msg->dst_fd + 1, NULL, &set, NULL, &msg->timeout) > 0){
+
+                    //当连接建立成功，即可运行,进入下一个状态
+                    msg->stage = 3;
+
+                    //如果成功，则向客户端发送成功连接报文
+                    printf("address连接成功:%s\n", inet_ntoa(msg->dst_addr.sin_addr));
+
+                    bzero(msg->buff, 10);
+                    msg->buff[0] = '\x05';
+                    msg->buff[3] = '\x01';
+
+                    //返回地址为0.0.0.0和端口0，因为它只是通知信息，要满足报文结构
+                    msg->valid = send(msg->src_fd, msg->buff, 10, 0);
+                    //event_base_loop(msg->base, EVLOOP_NONBLOCK);
+                    if(msg->valid != 10){
+                        msg->error = ST_VALIDLEN;
+                        msg->stage = 5;
+                        continue;
+                    }
+                }
+                else{
+                    perror("unreach");
+                    exit(0);
+                }
             }
             else{
                 //与客户端连接成功，但与远端服务器连接不成功,仅需要关闭客户端的链接，远端服务器的还未建立起来
                 //此时不能简单关闭，因为还在连接建立阶段，故要根据情况返回状态码
                 //[TODO]
+
+                msg->stage = 5;
                 printf("address连接失败:%s\n", inet_ntoa(msg->dst_addr.sin_addr));
                 bzero(msg->buff, 10);
                 msg->buff[0] = '\x05';
@@ -519,14 +461,32 @@ void handleMainConn(int fd, short event, void * arg){
 
                 msg->valid = send(msg->src_fd, msg->buff, 10, 0);
 
-                msg->stage = 5;
-                shutdown(msg->src_fd, SHUT_RDWR);
                 if(msg->valid != 10){
                     msg->error = ST_VALIDLEN;
                     msg->stage = 5;
-                    continue;
                 }
             }
+        }
+        else if(msg->stage == 3){
+                //说明此时已经连接到远端服务器了，两边的连接已经通畅，此时应该注册2个事件
+                //每个时间应该能够知道它能否被读，已经它是否被关闭，事件应该是常备事件
+                //ev1 负责从客户端读取数据发送到远端服务器
+                //ev2 负责从远端服务器读取数据发送到客户端
+                struct event * ev1 = event_new(msg->base, msg->src_fd, EV_READ|EV_CLOSED,  handleReadFromClient, (void *)msg);
+                struct event * ev2 = event_new(msg->base, msg->dst_fd, EV_READ|EV_CLOSED,  handleReadFromServer, (void *)msg);
+
+                //将两事件注册到msg上，在错误或关闭时，可以消去事件
+                msg->ev1 = ev1;
+                msg->ev2 = ev2;
+
+                event_add(ev1, NULL);
+                event_add(ev2, NULL);
+
+                //这里很重要，不能使用event_base_dispatch，因为要及时返回，否则事件集很可能阻塞在这里，直到ev1,ev2各调用一次
+                event_base_loop(msg->base, EVLOOP_NONBLOCK);
+                msg->stage = 6;
+                break;
+                //此处是正常状态，正常的跳出整个连接即可
         }
         else if(msg->stage == 4){
             //没有成功建立起与远端服务器的连接,应该删除主事件，并关闭src_fd
@@ -569,8 +529,8 @@ void handleMainConn(int fd, short event, void * arg){
                 continue;
             }
 
-            shutdown(msg->src_fd, SHUT_RDWR);
-            shutdown(msg->dst_fd, SHUT_RDWR);
+            close_fd(msg->src_fd, msg);
+            close_fd(msg->dst_fd, msg);
             break;
         }
     }
