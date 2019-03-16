@@ -34,7 +34,10 @@ int setblocking(int fd){
 int called = 0;
 
 void signal_cb(evutil_socket_t fd, short event, void * arg){
+    printf("event val is %x", event);
     struct event * signal = (struct event *)arg;
+
+    printf("now has %d events!\n", event_base_get_num_events(signal->ev_base,EVENT_BASE_COUNT_ADDED));
     if(event & EV_TIMEOUT){
         printf("EV_TIMEOUT is invoked!\n");
         event_del(signal);
@@ -85,21 +88,24 @@ int main(int argc, char ** argv){
     socklen_t len = sizeof(client);
 
 
-    setnoblocking(socket_fd);
+    //setnoblocking(socket_fd);
     int accept_fd = accept(socket_fd, (sockaddr*)&client, &len);
 
     struct timeval tv;
     evutil_timerclear(&tv);
-    tv.tv_sec = 3;
+    tv.tv_sec = 5;
 
+
+    struct event *e = event_new(base, -1, 0, signal_cb, event_self_cbarg());
+    event_add(e, &tv);
 
     printf("Program is running here!\n");
-    signal_init = event_new(base, accept_fd, EV_READ|EV_CLOSED|EV_TIMEOUT|EV_PERSIST, signal_cb, event_self_cbarg());
+    signal_init = event_new(base, accept_fd, EV_WRITE|EV_READ, signal_cb, event_self_cbarg());
 
     event_add(signal_init, &tv);
 
+    event_base_loop(base, EVLOOP_NO_EXIT_ON_EMPTY);
     //while(true){
-        event_base_loop(base, EVLOOP_NO_EXIT_ON_EMPTY);
     //}
     //event_base_loop(base, EVLOOP_ONCE);
     //event_base_loop(base, 0);
