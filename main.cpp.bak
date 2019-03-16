@@ -9,53 +9,20 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-int setnoblocking(int fd){
-    int flag,old_flag;
-
-    //这个msg->dst完全可以设定为非阻塞的,因为它已经给分配了fd
-    flag = fcntl(fd, F_GETFL, 0);
-    flag |= O_NONBLOCK;
-    flag = fcntl(fd, F_SETFL, flag); //将连接套接字设置为非阻塞。
-
-    return flag;
-}
-
-int setblocking(int fd){
-    int flag,old_flag;
-
-    //这个msg->dst完全可以设定为非阻塞的,因为它已经给分配了fd
-    flag = fcntl(fd, F_GETFL, 0);
-    flag &= ~O_NONBLOCK;
-    flag = fcntl(fd, F_SETFL, flag); //将连接套接字设置为非阻塞。
-
-    return flag;
-}
 
 int called = 0;
 
 void signal_cb(evutil_socket_t fd, short event, void * arg){
-    struct event * signal = (struct event *)arg;
     if(event & EV_TIMEOUT){
         printf("EV_TIMEOUT is invoked!\n");
-        event_del(signal);
     }
     else if(event & EV_READ){
         printf("EV_READ is invoked!\n");
         char buff[1024];
-        int valid = read(fd, buff, 1024);
-        if(valid > 0){
-            printf("%d chars is read\n", valid);
-            printf("%s", buff);
-        }
-        else{
-            printf("0 chars is read\n");
-            event_del(signal);
-        }
+        read(fd, buff, 1024);
+        printf("%s", buff);
     }
-    else if(event & EV_CLOSED){
-        shutdown(fd, SHUT_RDWR);
-        event_del(signal);
-    }
+    struct event * signal = (struct event *)arg;
 
     printf("signal_cb: got signal %d\n", event_get_signal(signal));
 }
@@ -85,18 +52,16 @@ int main(int argc, char ** argv){
     socklen_t len = sizeof(client);
 
 
-    setnoblocking(socket_fd);
     int accept_fd = accept(socket_fd, (sockaddr*)&client, &len);
 
     struct timeval tv;
     evutil_timerclear(&tv);
-    tv.tv_sec = 3;
+    tv.tv_sec = 1;
 
 
-    printf("Program is running here!\n");
-    signal_init = event_new(base, accept_fd, EV_READ|EV_CLOSED|EV_TIMEOUT|EV_PERSIST, signal_cb, event_self_cbarg());
+    signal_init = event_new(base, accept_fd, EV_READ|EV_PERSIST, signal_cb, event_self_cbarg());
 
-    event_add(signal_init, &tv);
+    event_add(signal_init, NULL);
 
     //while(true){
         event_base_loop(base, EVLOOP_NO_EXIT_ON_EMPTY);

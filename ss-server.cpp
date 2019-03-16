@@ -53,7 +53,7 @@ struct message{
         buff = new char[1460];
         bzero(buff, 1460);
         evutil_timerclear(&timeout);
-        timeout.tv_sec = 10;
+        timeout.tv_sec = 1;
     }
     ~message(){
         delete [] buff;
@@ -99,6 +99,7 @@ class Event{
 
 void *loopFunc(void * arg){
     Event *ev = (Event *)arg;
+    event_base_loop(ev->base, EVLOOP_NO_EXIT_ON_EMPTY);
     //[TODO]这里分配了event对象又该怎么做？
     //
     //自动就handle了呀，因为这些事件注册在Event这个基本对象中，
@@ -136,9 +137,9 @@ class EventThreadPool{
     public:
     EventThreadPool(int num){
         for(int i = 0; i < num; ++i){
-            EventThread th;
-            vec.push_back(&th);
-            res.push_back(th.get_base());
+            EventThread *th = new EventThread();
+            vec.push_back(th);
+            res.push_back(th->get_base());
         }
     }
 
@@ -175,74 +176,115 @@ void close_fd(int fd, struct message *msg){
 
 
 void handleReadFromClient(int fd, short event, void * arg){
+    printf("handleReadFromClient is invoked!\n");
     struct message *msg = (struct message *)arg;
 
     if(event & EV_READ){
         //以太网最大MTU为1500,IP头部20字节，TCP头部20字节
         msg->valid = recv(fd, msg->buff, 1460, 0);
         if(msg->valid > 0){
-            printf("%s", msg->buff);
+            printf("recv from client\n");
+            //printf("%s", msg->buff);
             msg->valid = send(msg->dst_fd, msg->buff, msg->valid, 0);
-            if(msg->valid == -1){
-                //向服务器发送失败,删除本事件,并向客户端报告这个状态码,关闭客户端的连接
-                close_fd(msg->dst_fd, msg);
-                close_fd(msg->src_fd, msg);
-                return;
-            }
-            else{
+            if(msg->valid > 0){
+                printf("send to server\n");
                 //只对那一部分被使用过的进行重置
                 bzero(msg->buff, msg->valid);
-                event_add(msg->ev1, NULL);
+                //event_add(msg->ev1, NULL);
+                //printf("add event is detected!\n");
+                return;
+            }
+            else {
+                //向服务器发送失败,删除本事件,并向客户端报告这个状态码,关闭客户端的连接
+                printf("fail send to server\n");
+                close_fd(msg->dst_fd, msg);
+                close_fd(msg->src_fd, msg);
+                event_del(msg->ev1);
+                event_del(msg->ev2);
+                return;
+
             }
         }
-        else if(msg->valid == -1){
-            //虽然客户端显示有数据，但读取数据错误，应该关闭服务器的连接
+        else{
+            //1.msg->valid == 0,说好有数据，但没读取到，说明已经关闭
+            //2.虽然客户端显示有数据，但读取数据错误，应该关闭服务器的连接
+            printf("fail recv from client\n");
             close_fd(msg->src_fd, msg);
             close_fd(msg->dst_fd, msg);
+            event_del(msg->ev1);
+            event_del(msg->ev2);
             return;
         }
     }
     else if(event & EV_CLOSED){
         //如果此时检测到关闭，仍旧是消去事件，并关闭另一个fd
+        printf("EV_CLOSED is detected!\n");
         close_fd(msg->dst_fd, msg);
         close_fd(msg->src_fd, msg);
+        event_del(msg->ev1);
+        event_del(msg->ev2);
         return;
+    }
+    else{
+        printf("Other is detected!\n");
+        event_del(msg->ev1);
+        event_del(msg->ev2);
     }
 }
 
 void handleReadFromServer(int fd, short event, void * arg){
+    printf("handleReadFromServer is invoked!\n");
     struct message *msg = (struct message *)arg;
 
     if(event & EV_READ){
         //以太网最大MTU为1500,IP头部20字节，TCP头部20字节
-        msg->valid = recv(fd, msg->buff, 1460, 0);
+        msg->valid = recv(msg->dst_fd, msg->buff, 1460, 0);
         if(msg->valid > 0){
-            printf("%s", msg->buff);
+            printf("recv from server\n");
+            //printf("%s", msg->buff);
             msg->valid = send(msg->src_fd, msg->buff, msg->valid, 0);
-            if(msg->valid == -1){
-                //向服务器发送失败,删除本事件,并向客户端报告这个状态码,关闭客户端的连接
-                close_fd(msg->src_fd, msg);
-                close_fd(msg->dst_fd, msg);
-                return;
-            }
-            else{
+            if(msg->valid > 0){
+                printf("send to client\n");
                 //只对那一部分被使用过的进行重置
                 bzero(msg->buff, msg->valid);
-                event_add(msg->ev2, NULL);
+                //event_add(msg->ev2, NULL);
+                //printf("add event is detected!\n");
+                return;
+            }
+            else {
+                //向服务器发送失败,删除本事件,并向客户端报告这个状态码,关闭客户端的连接
+                printf("fail send to client\n");
+                close_fd(msg->src_fd, msg);
+                close_fd(msg->dst_fd, msg);
+                event_del(msg->ev1);
+                event_del(msg->ev2);
+                return;
             }
         }
-        else if(msg->valid == -1){
-            //虽然客户端显示有数据，但读取数据错误，应该关闭服务器的连接
+        else{
+            //1.msg->valid == 0,说好有数据，但没读取到，说明已经关闭
+            //2.虽然客户端显示有数据，但读取数据错误，应该关闭服务器的连接
+            printf("fail recv from server\n");
             close_fd(msg->src_fd, msg);
             close_fd(msg->dst_fd, msg);
+            event_del(msg->ev1);
+            event_del(msg->ev2);
             return;
         }
     }
     else if(event & EV_CLOSED){
         //如果此时检测到关闭，仍旧是消去事件，并关闭另一个fd
+        printf("EV_CLOSED is detected!\n");
         close_fd(msg->dst_fd, msg);
         close_fd(msg->src_fd, msg);
+        event_del(msg->ev1);
+        event_del(msg->ev2);
         return;
+    }
+    else{
+        printf("Other is detected!\n");
+        event_del(msg->ev1);
+        event_del(msg->ev2);
     }
 }
 
@@ -271,12 +313,13 @@ int setblocking(int fd){
     return flag;
 }
 
-void handleMainConn(int fd, short event, void * arg){
+void handleFromMainConn(int fd, short event, void * arg){
 
     struct message * msg = (struct message *)arg;
 
     while(true){
         if(msg->stage == 0){
+            printf("Change to stage 0!\n");
             //*1*:接收版本号、加密方法数目和加密方法
             //*2*:从加密方法中，选择一项加密方法，并告知客户端
             struct ver_method_select header;
@@ -324,6 +367,7 @@ void handleMainConn(int fd, short event, void * arg){
             msg->stage = 1;
         }
         else if(msg->stage == 1){
+            printf("Change to stage 1!\n");
             //在 stage = 1 双方握手，确定目标服务器的IP、端口和协议信息
             struct connect_request recv_req;
             //从客户端接收信息
@@ -395,7 +439,8 @@ void handleMainConn(int fd, short event, void * arg){
                         //已经是网络字节序
                         //msg->dst_addr.sin_addr.s_addr = h->h_addr_list[i];
                         msg->dst_addr.sin_addr.s_addr = *((uint32_t *)h->h_addr_list[i]);
-                        break;
+                        printf(" i  is  %d  ,address is  %s\n", i, h->h_addr_list[i]);
+                        ++i;
                     }
                 }
                 else{
@@ -420,11 +465,14 @@ void handleMainConn(int fd, short event, void * arg){
             msg->stage = 2;
         }
         else if(msg->stage == 2){
+            printf("Change to stage 2!\n");
 
             //连接到远端服务器
             msg->dst_fd = socket(AF_INET, SOCK_STREAM, 0);
 
+            //setnoblocking(msg->dst_fd);
             int conn_res = connect(msg->dst_fd, (struct sockaddr *)&(msg->dst_addr), sizeof(msg->dst_addr));
+            //setblocking(msg->dst_fd);
 
 
             fd_set set;
@@ -433,7 +481,9 @@ void handleMainConn(int fd, short event, void * arg){
 
 
 
-            if(conn_res == 0 || (select(msg->dst_fd + 1, 0, &set, 0, &msg->timeout) > 0)){
+            if(select(msg->dst_fd + 1, 0, &set, 0, &msg->timeout) > 0){
+                printf("Suceed to connect to msg->dst!\n");
+                printf("After connect msg->dst is %d\n", msg->dst_fd);
                 //在msg->timeout内可以使用msg->dst_fd
                 msg->stage = 3;
 
@@ -474,25 +524,29 @@ void handleMainConn(int fd, short event, void * arg){
             }
         }
         else if(msg->stage == 3){
+            printf("Change to stage 3!\n");
             //说明此时已经连接到远端服务器了，两边的连接已经通畅，此时应该注册2个事件
             //每个时间应该能够知道它能否被读，已经它是否被关闭，事件应该是常备事件
             //ev1 负责从客户端读取数据发送到远端服务器
             //ev2 负责从远端服务器读取数据发送到客户端
 
-            msg->ev1 = event_new(msg->base, msg->src_fd, EV_READ|EV_CLOSED,  handleReadFromClient, (void *)msg);
-            msg->ev2 = event_new(msg->base, msg->dst_fd, EV_READ|EV_CLOSED,  handleReadFromServer, (void *)msg);
+            msg->ev1 = event_new(msg->base, msg->src_fd, EV_READ|EV_CLOSED|EV_PERSIST,  handleReadFromClient, (void *)msg);
+            msg->ev2 = event_new(msg->base, msg->dst_fd, EV_READ|EV_CLOSED|EV_PERSIST,  handleReadFromServer, (void *)msg);
 
             //将两事件注册到msg上，在错误或关闭时，可以消去事件
 
-            event_add(msg->ev1, NULL);
-            event_add(msg->ev2, NULL);
+            event_add(msg->ev1, &msg->timeout);
+            event_add(msg->ev2, &msg->timeout);
 
             //这里很重要，不能使用event_base_dispatch，因为要及时返回，否则事件集很可能阻塞在这里，直到ev1,ev2各调用一次
+            //event_base_loop(msg->base, EVLOOP_NONBLOCK);
+
             msg->stage = 6;
             break;
             //此处是正常状态，正常的跳出整个连接即可
         }
         else if(msg->stage == 4){
+            printf("Change to stage 4!\n");
             //没有成功建立起与远端服务器的连接,应该删除主事件，并关闭src_fd
             //远端服务器不可达
             bzero(msg->buff, 10);
@@ -517,6 +571,7 @@ void handleMainConn(int fd, short event, void * arg){
             break;
         }
         else if(msg->stage == 5){
+            printf("Change to stage 5!\n");
             //建立起来了与远端服务器的连接，目的是析构客户端和远端服务器的连接,删除主事件,而生成了子事件的可以自己删除自己
             //正常结束
 
@@ -560,19 +615,18 @@ class Server{
                 struct sockaddr_in client_addr;
                 socklen_t len = sizeof(client_addr);
 
-                msg.src_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &len);
-
-                //使用小根堆，获得各个线程的负载情况，找到那些正在处理事件少的线程，分配给新到来的事件
                 msg.base = get_low_load_base();
+                msg.src_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &len);
+                //使用小根堆，获得各个线程的负载情况，找到那些正在处理事件少的线程，分配给新到来的事件
+
                 msg.stage = 0;
 
 
                 //仅注册一次，分发给子线程处理，它的所有解析、传送、处理和关闭都交给子线程执行
-                msg.ev_m = event_new(msg.base, msg.src_fd, EV_READ, handleMainConn, (void *)&msg);
+                msg.ev_m = event_new(msg.base, msg.src_fd, EV_READ, handleFromMainConn, (void *)&msg);
                 event_add(msg.ev_m, NULL);
                 //event_base_dispatch(msg.base);
                 //event_base_loop(msg.base, EVLOOP_ONCE);
-                event_base_loop(msg.base, EVLOOP_NONBLOCK);
 
                 //setnoblocking(msg.src_fd);
                 //setblocking(msg.src_fd);
@@ -582,14 +636,16 @@ class Server{
 
         struct event_base * get_low_load_base(){
             struct event_base * res;
-            unsigned short c = 65535u, t;
-            for(int i = 0; i < bases.size(); ++i){
+            int t, c = 9999;
+            for(int i = 0; i < 4; ++i){
                 t = event_base_get_num_events(bases[i], EVENT_BASE_COUNT_ADDED);
+                printf("total num is %d, event base %d have %d events!\n", 4, i, t);
                 if(t < c){
                     c = t;
                     res = bases[i];
                 }
             }
+            printf("selected base has %d events\n", c);
             return res;
         }
 
