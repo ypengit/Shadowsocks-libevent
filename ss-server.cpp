@@ -43,6 +43,8 @@ struct message{
     short valid;
     struct bufferevent *bev1;
     struct bufferevent *bev2;
+    struct event *ev1;
+    struct event *ev2;
     struct event *ev_m;
     struct bufferevent *bev_c;
     char * buff;
@@ -177,152 +179,155 @@ void close_fd(int fd, struct message *msg){
 }
 
 
-void handleReadFromClient(struct bufferevent * bev, void * arg){
-    struct message * msg = (struct message*)arg;
-    msg->valid = recv(msg->src_fd, msg->buff, 1460, 0);
-    if(msg->valid > 0){
-        msg->valid = send(msg->dst_fd, msg->buff, msg->valid, 0);
-        if(msg->valid > 0){
-            printf("成功向远端服务器发送%d个字节!\n", msg->valid);
-        }
-        else{
-            printf("handleReadFromClient 发送错误！\n");
-        }
-    }
-    else{
-        printf("理论上这条消息");
-    }
-}
-
-void handleReadFromServer(struct bufferevent * bev, void * arg){
-    struct message * msg = (struct message*)arg;
-    msg->valid = recv(msg->dst_fd, msg->buff, 1460, 0);
-    if(msg->valid > 0){
-        msg->valid = send(msg->src_fd, msg->buff, msg->valid, 0);
-        if(msg->valid > 0){
-            printf("成功向client发送%d个字节!\n", msg->valid);
-        }
-        else{
-            printf("handleReadFromServer 发送错误！\n");
-        }
-    }
-    else{
-        printf("理论上这条消息");
-    }
-}
-
-
-
-
-//void handleReadFromClient(struct bufferevent * bev, short event, void * arg){
-//    printf("handleReadFromClient is invoked!\n");
-//    struct message *msg = (struct message *)arg;
-//
-//    printf("now has %d events!\n\n\n", event_base_get_num_events(msg->base, EVENT_BASE_COUNT_ADDED));
-//
-//    if(event & EV_READ){
-//        //以太网最大MTU为1500,IP头部20字节，TCP头部20字节
-//        msg->valid = recv(fd, msg->buff, 1460, 0);
+//void handleReadFromClient(struct bufferevent * bev, void * arg){
+//    struct message * msg = (struct message*)arg;
+//    msg->valid = recv(msg->src_fd, msg->buff, 1460, 0);
+//    if(msg->valid > 0){
+//        msg->valid = send(msg->dst_fd, msg->buff, msg->valid, 0);
 //        if(msg->valid > 0){
-//            printf("recv from client\n");
-//            //printf("%s", msg->buff);
-//            msg->valid = send(msg->dst_fd, msg->buff, msg->valid, 0);
-//            if(msg->valid > 0){
-//                printf("send to server\n");
-//                //只对那一部分被使用过的进行重置
-//                bzero(msg->buff, msg->valid);
-//                //printf("add event is detected!\n");
-//                return;
-//            }
-//            else {
-//                //向服务器发送失败,删除本事件,并向客户端报告这个状态码,关闭客户端的连接
-//                printf("fail send to server\n");
-//                close_fd(msg->dst_fd, msg);
-//                close_fd(msg->src_fd, msg);
-//                return;
-//
-//            }
+//            printf("成功向远端服务器发送%d个字节!\n", msg->valid);
 //        }
 //        else{
-//            //1.msg->valid == 0,说好有数据，但没读取到，说明已经关闭
-//            //2.虽然客户端显示有数据，但读取数据错误，应该关闭服务器的连接
-//            printf("fail recv from client\n");
-//            close_fd(msg->src_fd, msg);
-//            close_fd(msg->dst_fd, msg);
-//            return;
+//            printf("handleReadFromClient 发送错误！\n");
 //        }
 //    }
-//    else if(event & EV_CLOSED){
-//        //如果此时检测到关闭，仍旧是消去事件，并关闭另一个fd
-//        printf("EV_CLOSED is detected!\n");
-//        close_fd(msg->dst_fd, msg);
-//        close_fd(msg->src_fd, msg);
-//        return;
-//    }
-//    else if(event & EV_TIMEOUT){
-//        printf("event is %x\n", event);
-//    }
 //    else{
-//        printf("event is %x\n", event);
-//        printf("Other is detected!\n");
+//        printf("理论上这条消息");
 //    }
 //}
 //
-//void handleReadFromServer(struct bufferevent * bev, short event, void * arg){
-//    printf("handleReadFromServer is invoked!\n");
-//    struct message *msg = (struct message *)arg;
-//
-//    if(event & EV_READ){
-//        //以太网最大MTU为1500,IP头部20字节，TCP头部20字节
-//        msg->valid = recv(msg->dst_fd, msg->buff, 1460, 0);
+//void handleReadFromServer(struct bufferevent * bev, void * arg){
+//    struct message * msg = (struct message*)arg;
+//    msg->valid = recv(msg->dst_fd, msg->buff, 1460, 0);
+//    if(msg->valid > 0){
+//        msg->valid = send(msg->src_fd, msg->buff, msg->valid, 0);
 //        if(msg->valid > 0){
-//            printf("recv from server\n");
-//            //printf("%s", msg->buff);
-//            msg->valid = send(msg->src_fd, msg->buff, msg->valid, 0);
-//            if(msg->valid > 0){
-//                printf("send to client\n");
-//                //只对那一部分被使用过的进行重置
-//                bzero(msg->buff, msg->valid);
-//                //printf("add event is detected!\n");
-//                return;
-//            }
-//            else {
-//                //向服务器发送失败,删除本事件,并向客户端报告这个状态码,关闭客户端的连接
-//                printf("fail send to client\n");
-//                close_fd(msg->src_fd, msg);
-//                close_fd(msg->dst_fd, msg);
-//                return;
-//            }
+//            printf("成功向client发送%d个字节!\n", msg->valid);
 //        }
 //        else{
-//            //1.msg->valid == 0,说好有数据，但没读取到，说明已经关闭
-//            //2.虽然客户端显示有数据，但读取数据错误，应该关闭服务器的连接
-//            printf("fail recv from server\n");
-//            close_fd(msg->src_fd, msg);
-//            close_fd(msg->dst_fd, msg);
-//            return;
+//            printf("handleReadFromServer 发送错误！\n");
 //        }
 //    }
-//    else if(event & EV_CLOSED){
-//        //如果此时检测到关闭，仍旧是消去事件，并关闭另一个fd
-//        printf("EV_CLOSED is detected!\n");
-//        close_fd(msg->dst_fd, msg);
-//        close_fd(msg->src_fd, msg);
-//        return;
-//    }
-//    else if(event & EV_TIMEOUT){
-//        printf("EV_TIMEOUT is detected!\n");
-//        close_fd(msg->dst_fd, msg);
-//        close_fd(msg->src_fd, msg);
-//        return;
-//    }
 //    else{
-//        printf("Other is detected!\n");
-//        close_fd(msg->dst_fd, msg);
-//        close_fd(msg->src_fd, msg);
-//        return;
+//        printf("理论上这条消息");
 //    }
 //}
+//
+//
+
+
+void handleReadFromClient(int fd, short event, void * arg){
+    printf("handleReadFromClient is invoked!\n");
+    struct message *msg = (struct message *)arg;
+
+    printf("now has %d events!\n\n\n", event_base_get_num_events(msg->base, EVENT_BASE_COUNT_ADDED));
+
+    if(event & EV_READ){
+        //以太网最大MTU为1500,IP头部20字节，TCP头部20字节
+        msg->valid = recv(fd, msg->buff, 1460, 0);
+        printf("recv %d from client\n", msg->valid);
+        if(msg->valid > 0){
+            //printf("%s", msg->buff);
+            msg->valid = send(msg->dst_fd, msg->buff, msg->valid, 0);
+            if(msg->valid > 0){
+                printf("send to server\n");
+                //只对那一部分被使用过的进行重置
+                bzero(msg->buff, msg->valid);
+                //printf("add event is detected!\n");
+                event_add(msg->ev1, &msg->timeout);
+                return;
+            }
+            else {
+                //向服务器发送失败,删除本事件,并向客户端报告这个状态码,关闭客户端的连接
+                printf("fail send to server\n");
+                close_fd(msg->dst_fd, msg);
+                close_fd(msg->src_fd, msg);
+                return;
+
+            }
+        }
+        else{
+            //1.msg->valid == 0,说好有数据，但没读取到，说明已经关闭
+            //2.虽然客户端显示有数据，但读取数据错误，应该关闭服务器的连接
+            printf("fail recv from client\n");
+            close_fd(msg->src_fd, msg);
+            close_fd(msg->dst_fd, msg);
+            return;
+        }
+    }
+    else if(event & EV_CLOSED){
+        //如果此时检测到关闭，仍旧是消去事件，并关闭另一个fd
+        printf("EV_CLOSED is detected!\n");
+        close_fd(msg->dst_fd, msg);
+        close_fd(msg->src_fd, msg);
+        return;
+    }
+    else if(event & EV_TIMEOUT){
+        printf("event is %x\n", event);
+    }
+    else{
+        printf("event is %x\n", event);
+        printf("Other is detected!\n");
+    }
+}
+
+void handleReadFromServer(int fd, short event, void * arg){
+    printf("handleReadFromServer is invoked!\n");
+    struct message *msg = (struct message *)arg;
+
+    if(event & EV_READ){
+        //以太网最大MTU为1500,IP头部20字节，TCP头部20字节
+        msg->valid = recv(msg->dst_fd, msg->buff, 1460, 0);
+        printf("recv %d from server\n", msg->valid);
+        if(msg->valid > 0){
+            printf("recv from server\n");
+            //printf("%s", msg->buff);
+            msg->valid = send(msg->src_fd, msg->buff, msg->valid, 0);
+            if(msg->valid > 0){
+                printf("send to client\n");
+                //只对那一部分被使用过的进行重置
+                bzero(msg->buff, msg->valid);
+                event_add(msg->ev2, &msg->timeout);
+                //printf("add event is detected!\n");
+                return;
+            }
+            else {
+                //向服务器发送失败,删除本事件,并向客户端报告这个状态码,关闭客户端的连接
+                printf("fail send to client\n");
+                close_fd(msg->src_fd, msg);
+                close_fd(msg->dst_fd, msg);
+                return;
+            }
+        }
+        else{
+            //1.msg->valid == 0,说好有数据，但没读取到，说明已经关闭
+            //2.虽然客户端显示有数据，但读取数据错误，应该关闭服务器的连接
+            printf("fail recv from server\n");
+            close_fd(msg->src_fd, msg);
+            close_fd(msg->dst_fd, msg);
+            return;
+        }
+    }
+    else if(event & EV_CLOSED){
+        //如果此时检测到关闭，仍旧是消去事件，并关闭另一个fd
+        printf("EV_CLOSED is detected!\n");
+        close_fd(msg->dst_fd, msg);
+        close_fd(msg->src_fd, msg);
+        return;
+    }
+    else if(event & EV_TIMEOUT){
+        printf("EV_TIMEOUT is detected!\n");
+        close_fd(msg->dst_fd, msg);
+        close_fd(msg->src_fd, msg);
+        return;
+    }
+    else{
+        printf("Other is detected!\n");
+        close_fd(msg->dst_fd, msg);
+        close_fd(msg->src_fd, msg);
+        return;
+    }
+}
 
 
 
@@ -379,6 +384,8 @@ void handleConnToServerWriteable(struct bufferevent *bev, short event, void * ar
     printf("进入连接程序\n");
     struct message * msg = (struct message *)arg;
 
+    msg->dst_fd = bufferevent_getfd(bev);
+
     printf("Suceed to connect to msg->dst!\n");
     //在msg->timeout内可以使用msg->dst_fd
     msg->stage = 3;
@@ -411,6 +418,13 @@ void handleConnToServerWriteable(struct bufferevent *bev, short event, void * ar
     //ev2 负责从远端服务器读取数据发送到客户端
 
 
+    msg->ev1 = event_new(msg->base, msg->src_fd, EV_READ|EV_CLOSED,  handleReadFromClient, (void *)msg);
+    msg->ev2 = event_new(msg->base, msg->dst_fd, EV_READ|EV_CLOSED,  handleReadFromServer, (void *)msg);
+
+    ////将两事件注册到msg上，在错误或关闭时，可以消去事件
+
+    event_add(msg->ev1, &msg->timeout);
+    event_add(msg->ev2, &msg->timeout);
 
 
 
@@ -597,7 +611,7 @@ void handleConnFromMain(int fd, short event, void * arg){
 
             bufferevent_setcb(msg->bev_c, NULL, NULL, handleConnToServerWriteable, msg);
 
-                printf("Program is running here!\n");
+            //printf("Program is running here!\n");
 
 
             //setblocking(msg->dst_fd);
