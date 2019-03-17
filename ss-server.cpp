@@ -22,9 +22,67 @@
 #include <netdb.h>
 #include <limits>
 #include <fcntl.h>
+#include <list>
 
 #include "ss-server.h"
 
+
+class MemoryPool;
+struct message;
+
+
+
+
+class MemoryPool{
+    public:
+        //当前持有
+        MemoryPool():hold(10){
+            for(int i = 0; i < hold; ++i){
+                free_list.push_back((struct message *)malloc(400));
+            }
+        }
+        ~MemoryPool(){
+            //删除free_list和used_list中的所有数据
+            for(auto it = free_list.begin(); it != free_list.end(); ++it){
+                free(*it);
+            }
+            for(auto it = used_list.begin(); it != used_list.end(); ++it){
+                free(*it);
+            }
+        }
+        struct message * get_instance(){
+            printf("free is %d, used is %d!\n", free_list.size(), used_list.size());
+            if(free_list.size() * 1.5 < used_list.size()){
+                //扩容一倍
+                for(int i = 0; i < hold; ++i){
+                    free_list.push_back((struct message *)malloc(400));
+                }
+            }
+            auto it = free_list.front();
+            free_list.pop_front();
+            used_list.push_back(it);
+            return it;
+        }
+        void return_instance(struct message * ins){
+            printf("free is %d, used is %d!\n", free_list.size(), used_list.size());
+            if(free_list.size() > used_list.size() * 1.5 && (free_list.size() >= 5 || used_list.size() >= 5)){
+                //缩容50%
+                for(int i = 0; i < hold/2; ++i){
+                    auto it = free_list.front();
+                    free_list.pop_front();
+                    free(it);
+                }
+            }
+            for(auto it = used_list.begin(); *it == ins; ++it){
+                used_list.erase(it);
+            }
+            free_list.push_back(ins);
+        }
+    private:
+        int hold;
+        std::list<struct message *> free_list;
+        std::list<struct message *> used_list;
+};
 
 
 struct message{
@@ -43,6 +101,7 @@ struct message{
     struct event *ev_m;
     struct bufferevent *bev_c;
     char * buff;
+    static MemoryPool memorypool;
     struct timeval timeout;
     status error;
     message(){
@@ -54,44 +113,31 @@ struct message{
         timeout.tv_sec = 1;
     }
     ~message(){
+    }
+
+    void deconstructor(){
+        printf("~message is invoked!\n");
         delete [] buff;
-    }
-    operator new(size_t){
-        new (memorypool.get_instace())A
-    }
-    operator delete(size_t){
 
+    }
+
+    void * operator new(size_t, struct message * t){
+
+    }
+
+    void * operator new(size_t){
+        //placement new的时候会调用构造函数
+        struct message * res = new(memorypool.get_instance())message;
+        return res;
+    }
+    void operator delete(void * ins){
+        ((struct message *)ins)->deconstructor();
+        memorypool.return_instance((struct message *)ins);
     }
 };
 
-struct message_node{
-    struct message * msg;
-    struct message_node * next;
-    struct message_node * prev;
-};
 
-class MemoryPool{
-    public:
-        //当前持有
-        MemoryPool():hold(10){
-
-        }
-        ~MemoryPool(){
-
-        }
-        struct message * get_instance(){
-            if(list.empty()){
-
-            }
-        }
-        void return_instance(){
-
-        }
-    private:
-        int hold;
-        list<struct message *> free_list;
-        list<struct message *> use_list;
-};
+MemoryPool message::memorypool;
 
 class Event{
     public:
@@ -588,6 +634,7 @@ void Server::handleConnFromMain(int fd, short event, void * arg){
 
             shutdown(msg->src_fd, SHUT_RDWR);
 
+
             break;
         }
     }
@@ -609,22 +656,23 @@ void Server::start(){
     struct sockaddr_in source_addr;
     int socket_fd = listenPort(source_addr);
     //这里要循环，以在主端口上监听，如果有事件到来，那么
+    MemoryPool memorypool;
     while(true){
-        struct message msg;
+        struct message * msg = new struct message;
         struct sockaddr_in client_addr;
         socklen_t len = sizeof(client_addr);
 
-        msg.base = get_low_load_base();
-        msg.src_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &len);
+        msg->base = get_low_load_base();
+        msg->src_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &len);
         //使用小根堆，获得各个线程的负载情况，找到那些正在处理事件少的线程，分配给新到来的事件
 
-        msg.stage = 0;
+        msg->stage = 0;
 
 
         //仅注册一次，分发给子线程处理，它的所有解析、传送、处理和关闭都交给子线程执行
 
-        msg.ev_m = event_new(msg.base, msg.src_fd, EV_READ|EV_TIMEOUT, handleConnFromMain, (void *)&msg);
-        event_add(msg.ev_m, NULL);
+        msg->ev_m = event_new(msg->base, msg->src_fd, EV_READ|EV_TIMEOUT, handleConnFromMain, (void *)msg);
+        event_add(msg->ev_m, NULL);
         //event_base_dispatch(msg.base);
         //event_base_loop(msg.base, EVLOOP_ONCE);
 
