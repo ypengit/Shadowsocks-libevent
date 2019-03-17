@@ -29,57 +29,69 @@
 
 struct message{
     struct ver_method header;
+    struct connect_request connect_info;
     struct sockaddr_in src_addr;
     struct sockaddr_in dst_addr;
     struct event_base * base;
     char stage;
     char select_method;
-    char atyp;
-    char rep;
     int src_fd;
     int dst_fd;
     short valid;
-    struct bufferevent *bev1;
-    struct bufferevent *bev2;
     struct event *ev1;
     struct event *ev2;
     struct event *ev_m;
     struct bufferevent *bev_c;
     char * buff;
-    char * buff_s;
-    char * buff_c;
-    struct timeval tv;
     struct timeval timeout;
     status error;
     message(){
         //应当从内存池中申请一块区域
         valid = 0;
         buff = new char[1460];
-        buff_s = new char[1460];
-        buff_c = new char[1460];
         bzero(buff, 1460);
         evutil_timerclear(&timeout);
         timeout.tv_sec = 1;
     }
     ~message(){
         delete [] buff;
-        delete [] buff_s;
-        delete [] buff_c;
     }
-    void update_time(){
-        evutil_gettimeofday(&tv, NULL);
+    operator new(size_t){
+        new (memorypool.get_instace())A
     }
-    bool isExpired(){
-        return false;
-        struct timeval now, res;
-        evutil_timerclear(&res);
-        evutil_gettimeofday(&now, NULL);
-        evutil_timersub(&now, &tv, &res);
-        return evutil_timercmp(&res, &timeout, >);
+    operator delete(size_t){
+
     }
 };
 
+struct message_node{
+    struct message * msg;
+    struct message_node * next;
+    struct message_node * prev;
+};
 
+class MemoryPool{
+    public:
+        //当前持有
+        MemoryPool():hold(10){
+
+        }
+        ~MemoryPool(){
+
+        }
+        struct message * get_instance(){
+            if(list.empty()){
+
+            }
+        }
+        void return_instance(){
+
+        }
+    private:
+        int hold;
+        list<struct message *> free_list;
+        list<struct message *> use_list;
+};
 
 class Event{
     public:
@@ -139,60 +151,78 @@ class EventThreadPool{
 };
 
 
-//编码和解码的工作留到后面做，这里先假设不加密的情况[TODO]
-//class EncryptDecrypt{
-//    public:
-//    static encrypt(
-//};
+class Server{
+    public:
+        Server(std::string server_ip, int server_port, std::string password, std::string method, int threadNum);
+        void start();
+    private:
+        struct event_base * get_low_load_base();
+        int listenPort(struct sockaddr_in &source_addr);
+
+        static void handleConnToServer(struct bufferevent *bev, short event, void * arg);
+        static void handleConnFromMain(int fd, short event, void * arg);
+        static int close_events_and_fds(struct message * msg);
+
+        static void handleReadFromServer(int fd, short event, void * arg);
+        static void handleReadFromClient(int fd, short event, void * arg);
+        static int handleWriteToClient(void * arg);
+        static int handleWriteToServer(void * arg);
+
+        std::string server_ip;
+        std::string password;
+        std::string method;
+        int server_port;
+        int threadNum;
+        EventThreadPool eventThreadPool;
+        std::vector<struct event_base *> events;
+        std::vector<struct event_base*> bases;
+};
 
 
-
-
-
-
-//一个连接从它开始创建，就要给他创建一个事件，这个事件随着两端的连接是否断开为标志，而
-//不以其他情况为转移，只要两端的连接还在，那么就不应该断开这个连接
-
-void close_fd(int fd, struct message *msg){
-    shutdown(fd, SHUT_RDWR);
+//关闭msg的所有fd和event
+int Server::close_events_and_fds(struct message * msg){
+    shutdown(msg->src_fd, SHUT_RDWR);
+    shutdown(msg->dst_fd, SHUT_RDWR);
+    event_del(msg->ev1);
+    event_del(msg->ev2);
 }
 
-void close_events_and_fds(struct message * msg){
-        close_fd(msg->src_fd, msg);
-        close_fd(msg->dst_fd, msg);
-        event_del(msg->ev1);
-        event_del(msg->ev2);
-}
-
-//msg->ev4
-void handleWriteToClient(void * arg){
-    printf("handleWriteToClient is invoked!\n");
-    struct message *msg = (struct message *)arg;
-    msg->valid = send(msg->src_fd, msg->buff, msg->valid, 0);
-    if(msg->valid > 0){
-        bzero(msg->buff, msg->valid);
-    }
-    else{
-        close_events_and_fds(msg);
-    }
-}
-
-//msg->ev3
-void handleWriteToServer(void * arg){
-    printf("handleWriteToServer is invoked!\n");
+//msg->ev1-->use to write data
+int Server::handleWriteToServer(void * arg){
+    //printf("handleWriteToServer is invoked!\n");
     struct message *msg = (struct message *)arg;
     msg->valid = send(msg->dst_fd, msg->buff, msg->valid, 0);
     if(msg->valid > 0){
         bzero(msg->buff, msg->valid);
     }
     else{
+        if(msg->valid == -1){
+            msg->stage = 8;
+        }
+        close_events_and_fds(msg);
+    }
+}
+//msg->ev2-->use to write data
+int Server::handleWriteToClient(void * arg){
+    //printf("handleWriteToClient is invoked!\n");
+    struct message *msg = (struct message *)arg;
+    msg->valid = send(msg->src_fd, msg->buff, msg->valid, 0);
+    if(msg->valid > 0){
+        bzero(msg->buff, msg->valid);
+    }
+    else{
+        if(msg->valid == -1){
+            msg->stage = 8;
+            msg->error = ERROR_TRANSMISSION;
+        }
         close_events_and_fds(msg);
     }
 }
 
+
 //msg->ev1
-void handleReadFromClient(int fd, short event, void * arg){
-    printf("handleReadFromClient is invoked!\n");
+void Server::handleReadFromClient(int fd, short event, void * arg){
+    //printf("handleReadFromClient is invoked!\n");
     struct message *msg = (struct message *)arg;
 
     if(event & EV_READ){
@@ -200,9 +230,17 @@ void handleReadFromClient(int fd, short event, void * arg){
         msg->valid = recv(msg->src_fd, msg->buff, 1460, 0);
         if(msg->valid > 0){
             handleWriteToServer((void *)msg);
+            if(handleWriteToServer((void *)msg) != msg->valid){
+                msg->stage = 8;
+                msg->error = ERROR_VALID;
+            }
             event_add(msg->ev1, NULL);
         }
         else{
+            if(msg->valid == -1){
+                msg->stage = 8;
+                msg->error = ERROR_TRANSMISSION;
+            }
             close_events_and_fds(msg);
         }
     }
@@ -212,8 +250,8 @@ void handleReadFromClient(int fd, short event, void * arg){
 }
 
 //msg->ev2
-void handleReadFromServer(int fd, short event, void * arg){
-    printf("handleReadFromServer is invoked!\n");
+void Server::handleReadFromServer(int fd, short event, void * arg){
+    //printf("handleReadFromServer is invoked!\n");
     struct message *msg = (struct message *)arg;
 
     if(event & EV_READ){
@@ -221,10 +259,16 @@ void handleReadFromServer(int fd, short event, void * arg){
         msg->valid = recv(msg->dst_fd, msg->buff, 1460, 0);
 
         if(msg->valid > 0){
-            handleWriteToClient((void *)msg);
+            if(handleWriteToClient((void *)msg) != msg->valid){
+                msg->stage = 8;
+                msg->error = ERROR_VALID;
+            }
             event_add(msg->ev1, NULL);
         }
         else{
+            if(msg->valid == -1){
+                msg->stage = 8;
+            }
             close_events_and_fds(msg);
         }
     }
@@ -236,66 +280,62 @@ void handleReadFromServer(int fd, short event, void * arg){
 
 
 
-int setnoblocking(int fd){
-    int flag,old_flag;
+void Server::handleConnToServer(struct bufferevent *bev, short event, void * arg){
+    struct message * msg = (struct message *)arg;
 
-    //这个msg->dst完全可以设定为非阻塞的,因为它已经给分配了fd
-    flag = fcntl(fd, F_GETFL, 0);
-    flag |= O_NONBLOCK;
-    flag = fcntl(fd, F_SETFL, flag); //将连接套接字设置为非阻塞。
+    printf("Program is running here!\n");
 
-    return flag;
-}
-
-int setblocking(int fd){
-    int flag,old_flag;
-
-    //这个msg->dst完全可以设定为非阻塞的,因为它已经给分配了fd
-    flag = fcntl(fd, F_GETFL, 0);
-    flag &= ~O_NONBLOCK;
-    flag = fcntl(fd, F_SETFL, flag); //将连接套接字设置为非阻塞。
-
-    return flag;
-}
-
-
-void handleConnToServer(struct bufferevent *bev, short event, void * arg){
     if(event & BEV_EVENT_CONNECTED){
-        printf("进入连接程序\n");
-        struct message * msg = (struct message *)arg;
+        msg->stage = 4;
+
+        //连接上后可以获得fd
         msg->dst_fd = bufferevent_getfd(bev);
 
-        bzero(msg->buff, 10);
-        msg->buff[0] = '\x05';
-        msg->buff[3] = '\x01';
+        while(true){
+            if(msg->stage == 4){
+                //先发送reponse报文，表示目标主机已经连接上了
 
-        //返回地址为0.0.0.0和端口0，因为它只是通知信息，要满足报文结构
-        msg->valid = send(msg->src_fd, msg->buff, 10, 0);
+                bzero(msg->buff, 10);
+                msg->buff[0] = '\x05';
+                msg->buff[3] = '\x01';
 
-        //event_base_loop(msg->base, EVLOOP_NONBLOCK);
-        if(msg->valid != 10){
-            msg->error = ST_VALIDLEN;
-            msg->stage = 5;
+                //返回地址为0.0.0.0和端口0，因为它只是通知信息，要满足报文结构
+                msg->valid = send(msg->src_fd, msg->buff, 10, 0);
+
+                if(msg->valid != 10){
+                    msg->error = ERROR_VALID;
+                    msg->stage = 8;
+                }
+
+                //持续监听
+                //ev1 负责从客户端读取数据发送到远端服务器
+                //ev2 负责从远端服务器读取数据发送到客户端
+
+                msg->ev1 = event_new(msg->base, msg->src_fd, EV_READ|EV_PERSIST,  handleReadFromClient, (void *)msg);
+                msg->ev2 = event_new(msg->base, msg->dst_fd, EV_READ|EV_PERSIST,  handleReadFromServer, (void *)msg);
+
+                ////将两事件注册到msg上，在错误或关闭时，可以消去事件
+
+                event_add(msg->ev1, &msg->timeout);
+                event_add(msg->ev2, &msg->timeout);
+
+                //此处是正常状态，正常的跳出整个连接即可
+
+                msg->stage = 5;
+                break;
+
+            }
+            else if(msg->stage == 8){
+                shutdown(msg->src_fd, SHUT_RDWR);
+                shutdown(msg->dst_fd, SHUT_RDWR);
+                break;
+            }
         }
-
-        //持续监听
-        //ev1 负责从客户端读取数据发送到远端服务器
-        //ev2 负责从远端服务器读取数据发送到客户端
-
-        msg->ev1 = event_new(msg->base, msg->src_fd, EV_READ|EV_PERSIST,  handleReadFromClient, (void *)msg);
-        msg->ev2 = event_new(msg->base, msg->dst_fd, EV_READ|EV_PERSIST,  handleReadFromServer, (void *)msg);
-
-        ////将两事件注册到msg上，在错误或关闭时，可以消去事件
-
-        event_add(msg->ev1, NULL);
-        event_add(msg->ev2, NULL);
-
-        msg->stage = 6;
-        //此处是正常状态，正常的跳出整个连接即可
     }
     else if(event & BEV_EVENT_TIMEOUT){
-        //连接超时
-
+        //连接超时,到远端服务器的时间超时
+        shutdown(msg->src_fd, SHUT_RDWR);
+        shutdown(msg->dst_fd, SHUT_RDWR);
     }
 }
 
@@ -323,36 +363,16 @@ void handleConnToServer(struct bufferevent *bev, short event, void * arg){
 //
 //  stage = 8; 建立了双向连接，但仍出现了错误
 //
-//
 //*********************Stage的各种状态***********************//
 
 
-//*********************各种错误的原因************************//
-//  0.ERROR_CONNECT_CLIENT            未连接上客户端
-//  1.ERROR_PROTOCOL                  传输协议出错
-//  2.ERROR_VALID                   传输数据位错误，bf
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//*********************各种错误的原因************************//
-
-enum status{
-    ERROR_CONNECT_CLIENT,
-    ERROR_PROTOCOL
-};
 
 
-void handleConnFromMain(int fd, short event, void * arg){
-
-    msg->stage = 1;
+void Server::handleConnFromMain(int fd, short event, void * arg){
 
     struct message * msg = (struct message *)arg;
+
+    msg->stage = 1;
 
     while(true){
         if(msg->stage == 1){
@@ -360,101 +380,118 @@ void handleConnFromMain(int fd, short event, void * arg){
             //2:从加密方法中，选择一项加密方法，并告知客户端
             msg->valid = recv(msg->src_fd, (char *)&msg->header, 2, 0);
 
-            if((header.ver != SOCKS_VERSION5) || (msg->valid != 2)){
+            if(msg->valid != 2){
+                msg->stage = 7;
+                msg->error = ERROR_VALID;
+            }
+
+            if(msg->header.ver != SOCKS_VERSION5){
                 //协议错误,根据sock5协议标准，此情况下无需回答
                 msg->stage = 7;
+                msg->error = ERROR_PROTOCOL;
                 continue;
             }
 
-            printf("len is %d\n", header.method);
             //选择加密方式
-            if(header.method == 0){
+            if(msg->header.method == 0){
                 //默认不加密
                 msg->select_method = 0x00;
             }
             else{
                 //在剩下255种加密方法中选择一种,长度也可能不是255，由第二字节决定
-                msg->select_method = rand()%header.method;
-                char * methods = new char[header.method];
-                msg->valid = recv(msg->src_fd, methods, header.method, 0);
-                if(msg->valid != header.method){
-                    msg->error = ST_VALIDLEN;
-                    msg->stage = 4;
+                msg->select_method = rand()%msg->header.method;
+
+                char * methods = new char[msg->header.method];
+
+                msg->valid = recv(msg->src_fd, methods, msg->header.method, 0);
+
+                if(msg->valid != msg->header.method){
+                    delete [] methods;
+                    msg->error = ERROR_VALID;
+                    msg->stage = 7;
                     continue;
                 }
+
                 msg->select_method = methods[msg->select_method];
+
                 delete [] methods;
             }
 
             //将选择出来的加密方式传给客户端
             //[TODO]为了简便，直接用0，后面修改
             //header.method = msg->select_method;
-            header.method = '\x00';
+            msg->header.method = '\x00';
 
-            msg->valid = send(msg->src_fd, (char *)&header, 2, 0);
+            msg->valid = send(msg->src_fd, (char *)&msg->header, 2, 0);
 
             if(msg->valid != 2){
-                msg->error = ST_VALIDLEN;
-                msg->stage = 4;
+                msg->error = ERROR_VALID;
+                msg->stage = 7;
                 continue;
             }
-            msg->stage = 1;
+
+            msg->stage = 2;
+
         }
-        else if(msg->stage == 1){
-            printf("Change to stage 1!\n");
-            //在 stage = 1 双方握手，确定目标服务器的IP、端口和协议信息
-            struct connect_request recv_req;
+        else if(msg->stage == 2){
+            //1.获取远端服务器的地址和端口，将域名翻译为IP
             //从客户端接收信息
-            msg->valid = recv(msg->src_fd, (char *)&recv_req, 4, 0);
+            msg->valid = recv(msg->src_fd, (char *)&msg->connect_info, 4, 0);
+
+            //接收4字节的连接信息
             if(msg->valid != 4){
-                msg->error = ST_VALIDLEN;
-                msg->stage = 4;
+                msg->error = ERROR_VALID;
+                msg->stage = 7;
                 continue;
             }
-            msg->atyp = recv_req.atyp;
+
 
             //这里最长的是域名，可能有128位，而IPV4与IPV6都只有几位，
             //用char足矣,且方便读取域名信息
             char address_len;
-            switch(recv_req.atyp){
+            switch(msg->connect_info.atyp){
                 case 0x01:
                     //IPV4类型
                     address_len = 4;
                     break;
                 case 0x03:
+                    //[TODO]域名还没有完成
                     msg->valid = recv(msg->src_fd, &address_len, 1, 0);
+                    if(msg->valid != 1){
+                        //类型是域名，则他有一个位用来解析为ip
+                        msg->error = ERROR_VALID;
+                        msg->stage = 7;
+                        continue;
+                    }
                     break;
                 case 0x04:
                     break;
             }
-            printf("address len is %d\n", address_len);
+            //这里如果是域名，它的长度是不固定的，所以要new
             char * address = new char[address_len];
-
 
             msg->valid = recv(msg->src_fd, address, address_len, 0);
 
             if(msg->valid != address_len){
-                msg->error = ST_VALIDLEN;
-                msg->stage = 4;
+                msg->error = ERROR_VALID;
+                msg->stage = 7;
                 continue;
             }
 
-
-            unsigned short port;
-            msg->valid = recv(msg->src_fd, (char *)&port, 2, 0);
+            msg->valid = recv(msg->src_fd, (char *)&msg->dst_addr.sin_port, 2, 0);
 
             if(msg->valid != 2){
-                msg->error = ST_VALIDLEN;
-                msg->stage = 4;
+                msg->error = ERROR_VALID;
+                msg->stage = 7;
                 continue;
             }
 
             msg->dst_addr.sin_family = AF_INET;
-            msg->dst_addr.sin_port   = port;
+            msg->dst_addr.sin_port   = msg->dst_addr.sin_port;
 
 
             //域名查找较为复杂，稍后完成[TODO]
-            if(recv_req.atyp == 0x03){
+            if(msg->connect_info.atyp == 0x03){
                 //使用域名查询
                 struct hostent * h;
                 char * tmpaddr = new char[address_len+1];
@@ -482,7 +519,7 @@ void handleConnFromMain(int fd, short event, void * arg){
                 }
 
             }
-            else if(recv_req.atyp == 0x01){
+            else if(msg->connect_info.atyp == 0x01){
                 //传递过来的数据都是网络字节序，可以直接转义使用,其他无论是
                 //IPV4还是IPV6都可以直接设置传输
                 msg->dst_addr.sin_addr.s_addr = *((uint32_t *)address);
@@ -492,14 +529,12 @@ void handleConnFromMain(int fd, short event, void * arg){
 
             }
 
-
             printf("address:%s\n", inet_ntoa(msg->dst_addr.sin_addr));
 
             //如果没有在这里返回，则认为代理服务器已经获得远端服务器的ip与端口
-            msg->stage = 2;
+            msg->stage = 3;
         }
-        else if(msg->stage == 2){
-            printf("Change to stage 2!\n");
+        else if(msg->stage == 3){
 
             //连接到远端服务器
             msg->dst_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -508,162 +543,140 @@ void handleConnFromMain(int fd, short event, void * arg){
 
             bufferevent_setcb(msg->bev_c, NULL, NULL, handleConnToServer, msg);
 
-            //setblocking(msg->dst_fd);
-
             if (bufferevent_socket_connect(msg->bev_c,(struct sockaddr *)&msg->dst_addr, sizeof(msg->dst_addr)) < 0) {
-                //没能建立连接的情况
-                bufferevent_free(msg->bev_c);
-                return;
-            }
 
-            break;
+                bzero(msg->buff, 10);
+                msg->buff[0] = '\x05';
+                msg->buff[1] = '\x04';
+                msg->buff[3] = '\x01';
+
+                msg->valid = send(msg->src_fd, msg->buff, 10, 0);
+
+                if(msg->valid != 10){
+                    msg->error = ERROR_VALID;
+                    msg->stage = 7;
+                    continue;
+                }
+
+
+                //没能建立连接的情况
+                msg->stage = 7;
+                msg->error = ERROR_CONNECT_SERVER;
+                bufferevent_free(msg->bev_c);
+            }
+            else{
+                msg->stage = 4;
+                break;
+            }
         }
-        else if(msg->stage == 4){
-            printf("Change to stage 4!\n");
+        else if(msg->stage == 7){
+
             //没有成功建立起与远端服务器的连接,应该删除主事件，并关闭src_fd
             //远端服务器不可达
-            bzero(msg->buff, 10);
-            msg->buff[0] = '\x05';
-            msg->buff[1] = '\x04';
-            msg->buff[3] = '\x01';
 
             //协议错误
-            if(msg->error == ST_PROTOCOL){
+            if(msg->error == ERROR_PROTOCOL){
                 msg->buff[1] = '\x02';
             }
-
-            msg->valid = send(msg->src_fd, msg->buff, 10, 0);
-
-            if(msg->valid != 10){
-                msg->error = ST_VALIDLEN;
-                msg->stage = 5;
-                continue;
+            else if(msg->error == ERROR_CONNECT_SERVER){
+                printf("没有连接到远端服务器！\n");
             }
+            else if(msg->error == ERROR_VALID){
+                printf("长度无效！\n");
+            }
+
 
             shutdown(msg->src_fd, SHUT_RDWR);
-            break;
-        }
-        else if(msg->stage == 5){
-            printf("Change to stage 5!\n");
-            //建立起来了与远端服务器的连接，目的是析构客户端和远端服务器的连接,删除主事件,而生成了子事件的可以自己删除自己
-            //正常结束
 
-            bzero(msg->buff, 10);
-            msg->buff[0] = '\x05';
-            msg->buff[1] = '\x01';
-            msg->buff[3] = '\x01';
-
-            msg->valid = send(msg->src_fd, msg->buff, 10, 0);
-
-            if(msg->valid != 10){
-                msg->error = ST_VALIDLEN;
-                msg->stage = 5;
-                continue;
-            }
-
-            close_fd(msg->src_fd, msg);
-            close_fd(msg->dst_fd, msg);
             break;
         }
     }
 }
 
-class Server{
-    public:
-        //初始化服务器信息
-        Server(std::string server_ip, int server_port, std::string password, std::string method, int threadNum):
-            eventThreadPool(threadNum)
-        {
-            bases = eventThreadPool.get_bases();
 
+
+
+
+//初始化服务器信息
+Server::Server(std::string server_ip, int server_port, std::string password, std::string method, int threadNum)
+    : eventThreadPool(threadNum){
+    bases = eventThreadPool.get_bases();
+
+}
+
+//创建一个线程池，用于处理来自于主线程的消息
+void Server::start(){
+    struct sockaddr_in source_addr;
+    int socket_fd = listenPort(source_addr);
+    //这里要循环，以在主端口上监听，如果有事件到来，那么
+    while(true){
+        struct message msg;
+        struct sockaddr_in client_addr;
+        socklen_t len = sizeof(client_addr);
+
+        msg.base = get_low_load_base();
+        msg.src_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &len);
+        //使用小根堆，获得各个线程的负载情况，找到那些正在处理事件少的线程，分配给新到来的事件
+
+        msg.stage = 0;
+
+
+        //仅注册一次，分发给子线程处理，它的所有解析、传送、处理和关闭都交给子线程执行
+
+        msg.ev_m = event_new(msg.base, msg.src_fd, EV_READ|EV_TIMEOUT, handleConnFromMain, (void *)&msg);
+        event_add(msg.ev_m, NULL);
+        //event_base_dispatch(msg.base);
+        //event_base_loop(msg.base, EVLOOP_ONCE);
+
+        //应该在主线程中注册一个signal事件，用于结束所有存在的事件[TODO]
+    }
+}
+
+struct event_base * Server::get_low_load_base(){
+    struct event_base * res;
+    int t, c = 9999;
+    for(int i = 0; i < 4; ++i){
+        t = event_base_get_num_events(bases[i], EVENT_BASE_COUNT_ADDED);
+        printf("total num is %d, event base %d have %d events!\n", 4, i, t);
+        if(t < c){
+            c = t;
+            res = bases[i];
         }
+    }
+    printf("selected base has %d events\n", c);
+    return res;
+}
 
-        //创建一个线程池，用于处理来自于主线程的消息
-        void start(){
-            struct sockaddr_in source_addr;
-            int socket_fd = listenPort(source_addr);
-            //这里要循环，以在主端口上监听，如果有事件到来，那么
-            while(true){
-                struct message msg;
-                struct sockaddr_in client_addr;
-                socklen_t len = sizeof(client_addr);
+int Server::listenPort(struct sockaddr_in &source_addr){
+    int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
 
-                msg.base = get_low_load_base();
-                msg.src_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &len);
-                //使用小根堆，获得各个线程的负载情况，找到那些正在处理事件少的线程，分配给新到来的事件
+    struct sockaddr_in serverAddr;
 
-                msg.stage = 0;
+    bzero(&serverAddr, sizeof(serverAddr));
 
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(1080);
+    serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-                //仅注册一次，分发给子线程处理，它的所有解析、传送、处理和关闭都交给子线程执行
+    int flag = 1;
+    if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag)) < 0)
+    {
+        printf("socket setsockopt error=%d(%s)!!!\n", errno, strerror(errno));
+        exit(1);
+    }
 
-                msg.ev_m = event_new(msg.base, msg.src_fd, EV_READ|EV_TIMEOUT, handleConnFromMain, (void *)&msg);
-                event_add(msg.ev_m, NULL);
-                //event_base_dispatch(msg.base);
-                //event_base_loop(msg.base, EVLOOP_ONCE);
+    if(bind(socket_fd, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) == -1){
+        perror("bind");
+        exit(1);
+    }
 
-                //setnoblocking(msg.src_fd);
-                //setblocking(msg.src_fd);
-                //应该在主线程中注册一个signal事件，用于结束所有存在的事件[TODO]
-            }
-        }
+    if(listen(socket_fd, 2048) == -1){
+        perror("listen");
+        exit(1);
+    }
 
-        struct event_base * get_low_load_base(){
-            struct event_base * res;
-            int t, c = 9999;
-            for(int i = 0; i < 4; ++i){
-                t = event_base_get_num_events(bases[i], EVENT_BASE_COUNT_ADDED);
-                printf("total num is %d, event base %d have %d events!\n", 4, i, t);
-                if(t < c){
-                    c = t;
-                    res = bases[i];
-                }
-            }
-            printf("selected base has %d events\n", c);
-            return res;
-        }
-
-        int listenPort(struct sockaddr_in &source_addr){
-            int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
-
-            struct sockaddr_in serverAddr;
-
-            bzero(&serverAddr, sizeof(serverAddr));
-
-            serverAddr.sin_family = AF_INET;
-            serverAddr.sin_port = htons(1080);
-            serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-            int flag = 1;
-            if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag)) < 0)
-            {
-                printf("socket setsockopt error=%d(%s)!!!\n", errno, strerror(errno));
-                exit(1);
-            }
-
-            if(bind(socket_fd, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) == -1){
-                perror("bind");
-                exit(1);
-            }
-
-            if(listen(socket_fd, 2048) == -1){
-                perror("listen");
-                exit(1);
-            }
-
-            return socket_fd;
-        }
-
-    private:
-        std::string server_ip;
-        std::string password;
-        std::string method;
-        int server_port;
-        int threadNum;
-        EventThreadPool eventThreadPool;
-        std::vector<struct event_base *> events;
-        std::vector<struct event_base*> bases;
-};
+    return socket_fd;
+}
 
 
 int main(int argc, char ** argv){
