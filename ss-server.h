@@ -1,6 +1,10 @@
 //#pragma pack(1)
 
-struct ver_method_select{
+#define SOCKS_VERSION4 0x04
+#define SOCKS_VERSION5 0x05
+
+//Sock报文,沟通加密方法
+struct ver_method {
     char ver;
     char method;
 };
